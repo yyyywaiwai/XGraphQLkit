@@ -3,24 +3,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "XDirectGraphQLPoC",
+    name: "XGraphQLkit",
     platforms: [
         .iOS(.v16),
         .macOS(.v13)
     ],
     products: [
         .library(
-            name: "XDirectGraphQLPoC",
-            targets: ["XDirectGraphQLPoC"]
+            name: "XGraphQLkit",
+            targets: ["XGraphQLkit"]
         )
     ],
     targets: [
         .target(
-            name: "XDirectGraphQLPoC"
+            name: "XGraphQLkit"
         ),
         .testTarget(
-            name: "XDirectGraphQLPoCTests",
-            dependencies: ["XDirectGraphQLPoC"]
+            name: "XGraphQLkitTests",
+            dependencies: ["XGraphQLkit"]
         )
     ],
     swiftLanguageModes: [.v6]

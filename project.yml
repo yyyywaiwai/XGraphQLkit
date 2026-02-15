@@ -8,7 +8,7 @@ settings:
     SWIFT_VERSION: 6.0
     IPHONEOS_DEPLOYMENT_TARGET: 16.0
 packages:
-  XDirectGraphQLPoC:
+  XGraphQLkit:
     path: .
 targets:
   XGraphQLtest:
@@ -42,8 +42,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: jp.yyyywaiwai.CDXWidgettest
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
-      - package: XDirectGraphQLPoC
-        product: XDirectGraphQLPoC
+      - package: XGraphQLkit
+        product: XGraphQLkit
 schemes:
   XGraphQLtest:
     build:

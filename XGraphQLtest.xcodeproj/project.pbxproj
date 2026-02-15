@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		33ED247F8EE506F88839C56B /* XDirectGraphQLPoC in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0F68FFC0F41C1E345B7353 /* XDirectGraphQLPoC */; };
+		33ED247F8EE506F88839C56B /* XGraphQLkit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E0F68FFC0F41C1E345B7353 /* XGraphQLkit */; };
 		469180D37DBC7C68E93D3730 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 864B5A8463F9283E0822C775 /* ContentView.swift */; };
 		5865236A40998B915FF0C2FD /* XGraphQLtestApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6688891383E3F194633C0507 /* XGraphQLtestApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		6688891383E3F194633C0507 /* XGraphQLtestApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XGraphQLtestApp.swift; sourceTree = "<group>"; };
-		7A33BC3FEBAF0F4FEC97537D /* CDXWidget */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CDXWidget; path = .; sourceTree = SOURCE_ROOT; };
+		7A33BC3FEBAF0F4FEC97537D /* XGraphQLkit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = XGraphQLkit; path = .; sourceTree = SOURCE_ROOT; };
 		864B5A8463F9283E0822C775 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		935233177C839655F0EEDB2A /* XGraphQLtest.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = XGraphQLtest.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -24,7 +24,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				33ED247F8EE506F88839C56B /* XDirectGraphQLPoC in Frameworks */,
+				33ED247F8EE506F88839C56B /* XGraphQLkit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -61,7 +61,7 @@
 		C0DC84879BFF22BC641CD8A9 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				7A33BC3FEBAF0F4FEC97537D /* CDXWidget */,
+				7A33BC3FEBAF0F4FEC97537D /* XGraphQLkit */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -82,7 +82,7 @@
 			);
 			name = XGraphQLtest;
 			packageProductDependencies = (
-				6E0F68FFC0F41C1E345B7353 /* XDirectGraphQLPoC */,
+				6E0F68FFC0F41C1E345B7353 /* XGraphQLkit */,
 			);
 			productName = XGraphQLtest;
 			productReference = 935233177C839655F0EEDB2A /* XGraphQLtest.app */;
@@ -326,9 +326,9 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		6E0F68FFC0F41C1E345B7353 /* XDirectGraphQLPoC */ = {
+		6E0F68FFC0F41C1E345B7353 /* XGraphQLkit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = XDirectGraphQLPoC;
+			productName = XGraphQLkit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

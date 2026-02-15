@@ -4,6 +4,7 @@ public actor XDirectClient {
     private let auth: XAuthContext
     private let session: URLSession
     private var operationCache: [String: String] = [:]
+    private var operationCacheLoadedFromMainScript = false
     private var mainScriptBodyCache: String?
 
     public init(auth: XAuthContext, session: URLSession = .shared) {
@@ -275,23 +276,22 @@ public actor XDirectClient {
             return cached
         }
 
-        let scriptBody = try await mainScriptBody()
-        let escapedName = NSRegularExpression.escapedPattern(for: operationName)
-        // NOTE: X の main.*.js は巨大な1行JSになることが多いので、strict→loose の順で探す
-        let strict = "queryId:\\\"([^\\\"]+)\\\"\\s*,\\s*operationName:\\\"\\(escapedName)\\\""
-            .replacingOccurrences(of: "\\(escapedName)", with: escapedName)
-        let loose = "queryId:\\\"([^\\\"]+)\\\".*?operationName:\\\"\\(escapedName)\\\""
-            .replacingOccurrences(of: "\\(escapedName)", with: escapedName)
-
-        let queryId = firstCaptureGroup(in: scriptBody, pattern: strict)
-            ?? firstCaptureGroup(in: scriptBody, pattern: loose, regexOptions: [.dotMatchesLineSeparators])
-
-        guard let queryId else {
-            throw XDirectClientError.operationNotFound(operationName)
+        // main.js から operationName -> queryId をまとめて抽出してキャッシュする。
+        // (別経路のフォールバックはせず、この1経路のまま壊れにくくする)
+        if !operationCacheLoadedFromMainScript {
+            let scriptBody = try await mainScriptBody()
+            let extracted = XOperationIDExtractor.extractOperationIDs(from: scriptBody)
+            for (op, id) in extracted {
+                operationCache[op] = id
+            }
+            operationCacheLoadedFromMainScript = true
         }
 
-        operationCache[operationName] = queryId
-        return queryId
+        if let id = operationCache[operationName] {
+            return id
+        }
+
+        throw XDirectClientError.operationNotFound(operationName)
     }
 
     private func mainScriptBody() async throws -> String {
@@ -328,8 +328,16 @@ public actor XDirectClient {
     }
 
     private func toPost(from result: [String: Any], fallbackScreenName: String) -> XPost? {
-        guard let restID = result["rest_id"] as? String,
-              let legacy = result["legacy"] as? [String: Any] else {
+        // GraphQLのresultが Tweet 直下とは限らず、TweetWithVisibilityResults などで `tweet` に入ることがある
+        let tweet = unwrapTweetResult(result)
+
+        let legacy = (tweet["legacy"] as? [String: Any])
+            ?? ((tweet["tweet"] as? [String: Any])?["legacy"] as? [String: Any])
+        let restID = (tweet["rest_id"] as? String)
+            ?? (legacy?["id_str"] as? String)
+            ?? (tweet["id_str"] as? String)
+
+        guard let legacy, let restID, !restID.isEmpty else {
             return nil
         }
 
@@ -338,7 +346,7 @@ public actor XDirectClient {
 
         let createdAtRaw = legacy["created_at"] as? String
         let createdAt = createdAtRaw.flatMap(parseTwitterDate)
-        let screenName = extractScreenName(from: result) ?? fallbackScreenName
+        let screenName = extractScreenName(from: tweet) ?? fallbackScreenName
         let media = extractMedia(from: legacy, postID: restID)
 
         guard let url = URL(string: "https://x.com/\(screenName)/status/\(restID)") else {
@@ -458,6 +466,18 @@ public actor XDirectClient {
         return legacy["screen_name"] as? String
     }
 
+    private func unwrapTweetResult(_ result: [String: Any]) -> [String: Any] {
+        if let tweet = result["tweet"] as? [String: Any] {
+            return tweet
+        }
+        if let inner = result["result"] as? [String: Any] {
+            // まれに result が二重になる形が混ざることがある
+            if let tweet = inner["tweet"] as? [String: Any] { return tweet }
+            return inner
+        }
+        return result
+    }
+
     private func collectTweetResults(in node: Any, into sink: inout [[String: Any]]) {
         if let dict = node as? [String: Any] {
             if let tweetResults = dict["tweet_results"] as? [String: Any],
@@ -482,7 +502,8 @@ public actor XDirectClient {
 
     private func findBottomCursor(in node: Any) -> String? {
         if let dict = node as? [String: Any] {
-            if (dict["cursorType"] as? String) == "Bottom",
+            if let ct = dict["cursorType"] as? String,
+               ct.lowercased().contains("bottom"),
                let value = dict["value"] as? String,
                !value.isEmpty {
                 return value

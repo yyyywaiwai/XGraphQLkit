@@ -130,7 +130,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .navigationTitle("CDXWidget")
+            .navigationTitle("XGraphQLtest")
         }
     }
 }

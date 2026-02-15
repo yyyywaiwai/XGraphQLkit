@@ -1,4 +1,4 @@
-name: CDXWidget
+name: XGraphQLtest
 options:
   minimumXcodeGenVersion: 2.44.0
   developmentLanguage: ja
@@ -11,7 +11,7 @@ packages:
   XDirectGraphQLPoC:
     path: .
 targets:
-  CDXWidget:
+  XGraphQLtest:
     type: application
     platform: iOS
     deploymentTarget: "16.0"
@@ -20,7 +20,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: CDXWidget
+        CFBundleDisplayName: XGraphQLtest
         UILaunchScreen:
           UIColorName: ""
         UIApplicationSceneManifest:
@@ -37,16 +37,18 @@ targets:
           - UIInterfaceOrientationLandscapeRight
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.CDXWidget
+        DEVELOPMENT_TEAM: L8K7QM3JD5
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: jp.yyyywaiwai.CDXWidgettest
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - package: XDirectGraphQLPoC
         product: XDirectGraphQLPoC
 schemes:
-  CDXWidget:
+  XGraphQLtest:
     build:
       targets:
-        CDXWidget: all
+        XGraphQLtest: all
     run:
       config: Debug
     test:

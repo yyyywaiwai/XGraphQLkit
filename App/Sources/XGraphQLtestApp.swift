@@ -1,11 +1,10 @@
 import SwiftUI
 
 @main
-struct CDXWidgetApp: App {
+struct XGraphQLtestApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
     }
 }
-

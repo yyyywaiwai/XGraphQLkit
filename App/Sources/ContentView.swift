@@ -1,6 +1,6 @@
 import SwiftUI
 import AVKit
-import XDirectGraphQLPoC
+import XGraphQLkit
 
 @MainActor
 final class TimelineViewModel: ObservableObject {

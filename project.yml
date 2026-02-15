@@ -1,0 +1,53 @@
+name: CDXWidget
+options:
+  minimumXcodeGenVersion: 2.44.0
+  developmentLanguage: ja
+  xcodeVersion: 16.0
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    IPHONEOS_DEPLOYMENT_TARGET: 16.0
+packages:
+  XDirectGraphQLPoC:
+    path: .
+targets:
+  CDXWidget:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: App/Sources
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: CDXWidget
+        UILaunchScreen:
+          UIColorName: ""
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.CDXWidget
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: XDirectGraphQLPoC
+        product: XDirectGraphQLPoC
+schemes:
+  CDXWidget:
+    build:
+      targets:
+        CDXWidget: all
+    run:
+      config: Debug
+    test:
+      config: Debug

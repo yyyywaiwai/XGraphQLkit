@@ -3,37 +3,124 @@ import Foundation
 public actor XDirectClient {
     private let auth: XAuthContext
     private let session: URLSession
+    private let debugLog: (@Sendable (String) -> Void)?
     private var operationCache: [String: String] = [:]
     private var operationCacheLoadedFromMainScript = false
     private var mainScriptBodyCache: String?
+    private var clientTransactionIDUsageIndexByOperation: [String: Int] = [:]
+    private static let operationIDFallback: [String: String] = [
+        "Bookmarks": "toTC7lB_mQm5fuBE5yyEJw"
+    ]
 
-    public init(auth: XAuthContext, session: URLSession = .shared) {
+    public init(
+        auth: XAuthContext,
+        session: URLSession = .shared,
+        debugLog: (@Sendable (String) -> Void)? = nil
+    ) {
         self.auth = auth
         self.session = session
+        self.debugLog = debugLog
     }
 
     public func listUserPosts(screenName: String, count: Int = 20, cursor: String? = nil) async throws -> XPostsPage {
-        let userId = try await resolveUserID(screenName: screenName)
+        try await listUserPosts(
+            screenName: screenName,
+            timeline: .posts,
+            count: count,
+            cursor: cursor
+        )
+    }
 
+    public func listUserPosts(
+        screenName: String,
+        timeline: XUserTimelineType,
+        count: Int = 20,
+        cursor: String? = nil
+    ) async throws -> XPostsPage {
+        let userId = try await resolveUserID(screenName: screenName)
+        let request = userTimelineRequest(
+            screenName: screenName,
+            userId: userId,
+            timeline: timeline,
+            count: count,
+            cursor: cursor
+        )
+
+        let root = try await requestGraphQL(
+            operationName: request.operationName,
+            variables: request.variables,
+            refererPath: request.refererPath
+        )
+
+        let page = parsePostsPage(root: root, fallbackScreenName: screenName)
+        return page
+    }
+
+    public func searchPosts(
+        query: String,
+        type: XSearchTimelineType = .top,
+        count: Int = 20,
+        cursor: String? = nil,
+        querySource: String = "typed_query"
+    ) async throws -> XPostsPage {
         var variables: [String: Any] = [
-            "userId": userId,
-            "count": max(1, min(count, 100)),
-            "includePromotedContent": false,
-            "withQuickPromoteEligibilityTweetFields": true,
-            "withVoice": true
+            "rawQuery": query,
+            "count": normalizedCount(count),
+            "product": type.productValue,
+            "querySource": querySource,
+            "withGrokTranslatedBio": false
         ]
         if let cursor, !cursor.isEmpty {
             variables["cursor"] = cursor
         }
 
         let root = try await requestGraphQL(
-            operationName: "UserTweets",
+            operationName: "SearchTimeline",
             variables: variables,
-            refererPath: "/\(screenName)"
+            refererPath: searchRefererPath(query: query, querySource: querySource, type: type)
         )
 
-        let page = parsePostsPage(root: root, fallbackScreenName: screenName)
-        return page
+        return parsePostsPage(root: root, fallbackScreenName: "i")
+    }
+
+    public func listBookmarks(count: Int = 20, cursor: String? = nil) async throws -> XPostsPage {
+        var variables: [String: Any] = [
+            "count": normalizedCount(count),
+            "includePromotedContent": true
+        ]
+        if let cursor, !cursor.isEmpty {
+            variables["cursor"] = cursor
+        }
+
+        let root = try await requestGraphQL(
+            operationName: "Bookmarks",
+            variables: variables,
+            refererPath: "/i/bookmarks"
+        )
+        return parsePostsPage(root: root, fallbackScreenName: "i")
+    }
+
+    public func searchBookmarks(
+        query: String,
+        count: Int = 20,
+        cursor: String? = nil,
+        querySource: String = "typed_query"
+    ) async throws -> XPostsPage {
+        var variables: [String: Any] = [
+            "rawQuery": query,
+            "count": normalizedCount(count),
+            "querySource": querySource
+        ]
+        if let cursor, !cursor.isEmpty {
+            variables["cursor"] = cursor
+        }
+
+        let root = try await requestGraphQL(
+            operationName: "BookmarkSearchTimeline",
+            variables: variables,
+            refererPath: "/i/bookmarks"
+        )
+        return parsePostsPage(root: root, fallbackScreenName: "i")
     }
 
     private func resolveUserID(screenName: String) async throws -> String {
@@ -51,6 +138,132 @@ public actor XDirectClient {
         }
 
         throw XDirectClientError.userIdNotFound(screenName)
+    }
+
+    private struct UserTimelineRequest {
+        let operationName: String
+        let refererPath: String
+        let variables: [String: Any]
+    }
+
+    private func userTimelineRequest(
+        screenName: String,
+        userId: String,
+        timeline: XUserTimelineType,
+        count: Int,
+        cursor: String?
+    ) -> UserTimelineRequest {
+        var variables: [String: Any] = [
+            "userId": userId,
+            "count": normalizedCount(count),
+            "withVoice": true
+        ]
+
+        let operationName: String
+        let refererPath: String
+        switch timeline {
+        case .posts:
+            operationName = "UserTweets"
+            refererPath = "/\(screenName)"
+            variables["includePromotedContent"] = true
+            variables["withQuickPromoteEligibilityTweetFields"] = true
+        case .replies:
+            operationName = "UserTweetsAndReplies"
+            refererPath = "/\(screenName)/with_replies"
+            variables["includePromotedContent"] = true
+            variables["withCommunity"] = true
+        case .media:
+            operationName = "UserMedia"
+            refererPath = "/\(screenName)/media"
+            variables["includePromotedContent"] = false
+            variables["withClientEventToken"] = false
+            variables["withBirdwatchNotes"] = false
+        case .highlights:
+            operationName = "UserHighlightsTweets"
+            refererPath = "/\(screenName)/highlights"
+            variables["includePromotedContent"] = true
+        }
+
+        if let cursor, !cursor.isEmpty {
+            variables["cursor"] = cursor
+        }
+
+        return UserTimelineRequest(
+            operationName: operationName,
+            refererPath: refererPath,
+            variables: variables
+        )
+    }
+
+    private func searchRefererPath(
+        query: String,
+        querySource: String,
+        type: XSearchTimelineType
+    ) -> String {
+        var components = URLComponents()
+        components.path = "/search"
+        var items = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "src", value: querySource)
+        ]
+        if let filter = type.filterQueryValue {
+            items.append(URLQueryItem(name: "f", value: filter))
+        }
+        components.queryItems = items
+        if let query = components.percentEncodedQuery, !query.isEmpty {
+            return "/search?\(query)"
+        }
+        return "/search"
+    }
+
+    private func normalizedCount(_ count: Int) -> Int {
+        max(1, min(count, 100))
+    }
+
+    private func clientTransactionID(
+        for operationName: String,
+        requestPath: String,
+        method: String
+    ) async -> String? {
+        if let configured = auth.clientTransactionIDsByOperation[operationName] {
+            let tokens = configured
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            if !tokens.isEmpty {
+                let index = clientTransactionIDUsageIndexByOperation[operationName, default: 0]
+                let safeIndex = min(index, tokens.count - 1)
+                if index < tokens.count - 1 {
+                    clientTransactionIDUsageIndexByOperation[operationName] = index + 1
+                }
+                let selected = tokens[safeIndex]
+                logDebug("[XCTID] source=op-config op=\(operationName) idx=\(safeIndex) token=\(debugToken(selected))")
+                return selected
+            }
+        }
+
+        if let token = auth.clientTransactionID,
+           !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            logDebug("[XCTID] source=global op=\(operationName) token=\(debugToken(token))")
+            return token
+        }
+
+        #if canImport(WebKit)
+        let generated = await XClientTransactionIDGenerator.shared.generate(
+            path: requestPath,
+            method: method
+        )
+        if let generated {
+            logDebug("[XCTID] source=webkit op=\(operationName) token=\(debugToken(generated))")
+        } else {
+            logDebug("[XCTID] source=webkit op=\(operationName) token=-")
+        }
+        return generated
+        #else
+        logDebug("[XCTID] source=none op=\(operationName) token=-")
+        return nil
+        #endif
     }
 
     private func requestGraphQL(
@@ -88,6 +301,12 @@ public actor XDirectClient {
                 for key in missingFieldToggles where extraFieldToggles[key] == nil {
                     extraFieldToggles[key] = false
                 }
+
+                logDebug("""
+                [RETRY] op=\(operationName) attempt=\(attempt + 1)
+                        add features=\(missingFeatures.joined(separator: ","))
+                        add fieldToggles=\(missingFieldToggles.joined(separator: ","))
+                """)
 
                 // 最終attemptでまだ失敗していたら、そのままエラーを返す
                 if attempt == 3 {
@@ -139,22 +358,86 @@ public actor XDirectClient {
         request.setValue(auth.csrfToken, forHTTPHeaderField: "x-csrf-token")
         request.setValue("yes", forHTTPHeaderField: "x-twitter-active-user")
         request.setValue(auth.language, forHTTPHeaderField: "x-twitter-client-language")
+        request.setValue("OAuth2Session", forHTTPHeaderField: "x-twitter-auth-type")
+        let generatedXClientTransactionID = await clientTransactionID(
+            for: operationName,
+            requestPath: components.path,
+            method: request.httpMethod ?? "GET"
+        )
+        if let clientTransactionID = generatedXClientTransactionID {
+            request.setValue(clientTransactionID, forHTTPHeaderField: "x-client-transaction-id")
+        }
         request.setValue(auth.cookieHeader, forHTTPHeaderField: "Cookie")
         request.setValue("https://x.com\(refererPath)", forHTTPHeaderField: "Referer")
+
+        let variablesLog = debugJSONString(variables)
+        let featureKeys = features.keys.sorted()
+        let fieldToggleKeys = fieldToggles.keys.sorted()
+        let headerLog = [
+            "authorization": debugToken(auth.bearerToken),
+            "x-csrf-token": debugToken(auth.csrfToken),
+            "x-twitter-client-language": auth.language,
+            "x-client-transaction-id": debugToken(generatedXClientTransactionID),
+            "cookie-len": String(auth.cookieHeader.count),
+            "referer": "https://x.com\(refererPath)"
+        ]
+        let headerSummary = headerLog
+            .sorted(by: { $0.key < $1.key })
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ", ")
+
+        logDebug("""
+        [REQ] op=\(operationName) opId=\(operationId)
+              url=\(url.absoluteString)
+              headers={\(headerSummary)}
+              vars=\(variablesLog)
+              features.count=\(featureKeys.count) fieldToggles.count=\(fieldToggleKeys.count)
+              features.keys=\(featureKeys.joined(separator: ","))
+              fieldToggles.keys=\(fieldToggleKeys.joined(separator: ","))
+        """)
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw XDirectClientError.invalidResponse
         }
 
+        let responseBody = String(data: data, encoding: .utf8) ?? ""
+        let responsePrefix = String(responseBody.prefix(220))
+        let responseHeaderKeys = [
+            "content-type",
+            "x-transaction-id",
+            "x-response-time",
+            "x-rate-limit-limit",
+            "x-rate-limit-remaining",
+            "x-rate-limit-reset",
+            "x-access-level"
+        ]
+        let responseHeaderSummary = responseHeaderKeys
+            .map { key in "\(key)=\(http.value(forHTTPHeaderField: key) ?? "-")" }
+            .joined(separator: ", ")
+        logDebug("""
+        [RES] op=\(operationName) status=\(http.statusCode) bytes=\(data.count)
+              headers={\(responseHeaderSummary)}
+              body=\(responsePrefix)
+        """)
+
         guard (200...299).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
+            if let graphQLErrors = debugGraphQLErrorSummary(from: data), !graphQLErrors.isEmpty {
+                logDebug("[RES_ERR] op=\(operationName) status=\(http.statusCode) errors=\(graphQLErrors)")
+            }
+            if http.statusCode == 404 {
+                logDebug("""
+                [RES_404] op=\(operationName) opId=\(operationId)
+                          path=/i/api/graphql/\(operationId)/\(operationName)
+                          hint=queryId(operationId)不一致の可能性あり
+                """)
+            }
             if http.statusCode == 401 || http.statusCode == 403 {
                 throw XDirectClientError.unauthorized(status: http.statusCode)
             }
             // 400 は不足features/fieldTogglesの抽出に本文が必要なので少し長めに保持する
             let limit = (http.statusCode == 400) ? 10_000 : 350
-            throw XDirectClientError.badStatus(status: http.statusCode, body: String(body.prefix(limit)))
+            throw XDirectClientError.badStatus(status: http.statusCode, body: String(responseBody.prefix(limit)))
         }
 
         return try JSONSerialization.jsonObject(with: data, options: [])
@@ -216,7 +499,7 @@ public actor XDirectClient {
                 "withPayments": false,
                 "withAuxiliaryUserLabels": true
             ]
-        case "UserTweets":
+        case "UserTweets", "UserTweetsAndReplies":
             return [
                 "withArticlePlainText": false
             ]
@@ -229,6 +512,7 @@ public actor XDirectClient {
         // 2026-02-16 時点でのWebクライアント相当（未指定だと 400 で落ちることがある）
         // 値は「とりあえず動く」こと優先で、将来はmain.jsなどから動的に追従させる余地あり。
         return [
+            "rweb_video_screen_enabled": false,
             "hidden_profile_subscriptions_enabled": true,
             "profile_label_improvements_pcf_label_in_post_enabled": true,
             "responsive_web_profile_redirect_enabled": false,
@@ -273,11 +557,11 @@ public actor XDirectClient {
 
     private func operationID(for operationName: String) async throws -> String {
         if let cached = operationCache[operationName] {
+            logDebug("[OPID] cache hit op=\(operationName) id=\(cached)")
             return cached
         }
 
         // main.js から operationName -> queryId をまとめて抽出してキャッシュする。
-        // (別経路のフォールバックはせず、この1経路のまま壊れにくくする)
         if !operationCacheLoadedFromMainScript {
             let scriptBody = try await mainScriptBody()
             let extracted = XOperationIDExtractor.extractOperationIDs(from: scriptBody)
@@ -285,10 +569,29 @@ public actor XDirectClient {
                 operationCache[op] = id
             }
             operationCacheLoadedFromMainScript = true
+            logDebug("[OPID] main.js loaded ops=\(extracted.count)")
         }
 
         if let id = operationCache[operationName] {
+            logDebug("[OPID] main.js hit op=\(operationName) id=\(id)")
             return id
+        }
+
+        if !operationCache.isEmpty {
+            let samples = operationCache.keys.sorted().prefix(14).joined(separator: ",")
+            logDebug("[OPID] miss op=\(operationName) cache.count=\(operationCache.count) sample=[\(samples)]")
+        }
+
+        if let override = auth.operationIDOverrides[operationName], !override.isEmpty {
+            operationCache[operationName] = override
+            logDebug("[OPID] override op=\(operationName) id=\(override)")
+            return override
+        }
+
+        if let fallback = Self.operationIDFallback[operationName] {
+            operationCache[operationName] = fallback
+            logDebug("[OPID] fallback op=\(operationName) id=\(fallback)")
+            return fallback
         }
 
         throw XDirectClientError.operationNotFound(operationName)
@@ -300,6 +603,7 @@ public actor XDirectClient {
         }
 
         let scriptURL = try await XAuthCapture.findMainScriptURL(session: session)
+        logDebug("[OPID] main.js url=\(scriptURL.absoluteString)")
         let (data, response) = try await session.data(from: scriptURL)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw XDirectClientError.invalidResponse
@@ -307,6 +611,42 @@ public actor XDirectClient {
         let body = String(data: data, encoding: .utf8) ?? ""
         mainScriptBodyCache = body
         return body
+    }
+
+    private func logDebug(_ message: String) {
+        debugLog?(message)
+    }
+
+    private func debugToken(_ token: String?) -> String {
+        guard let token, !token.isEmpty else { return "-" }
+        if token.count <= 14 { return token }
+        return "\(token.prefix(10))...\(token.suffix(4))"
+    }
+
+    private func debugJSONString(_ dictionary: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
+    }
+
+    private func debugGraphQLErrorSummary(from data: Data) -> String? {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data, options: []),
+            let dictionary = root as? [String: Any],
+            let errors = dictionary["errors"] as? [[String: Any]],
+            !errors.isEmpty
+        else {
+            return nil
+        }
+
+        let items = errors.prefix(4).map { error -> String in
+            let code = ((error["extensions"] as? [String: Any])?["code"] as? String) ?? "-"
+            let message = (error["message"] as? String) ?? "(no message)"
+            return "\(code):\(message)"
+        }
+        return items.joined(separator: " | ")
     }
 
     private func parsePostsPage(root: Any, fallbackScreenName: String) -> XPostsPage {

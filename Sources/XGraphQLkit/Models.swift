@@ -5,12 +5,26 @@ public struct XAuthContext: Sendable, Equatable {
     public let csrfToken: String
     public let bearerToken: String
     public let language: String
+    public let clientTransactionID: String?
+    public let clientTransactionIDsByOperation: [String: String]
+    public let operationIDOverrides: [String: String]
 
-    public init(cookieHeader: String, csrfToken: String, bearerToken: String, language: String = "en") {
+    public init(
+        cookieHeader: String,
+        csrfToken: String,
+        bearerToken: String,
+        language: String = "en",
+        clientTransactionID: String? = nil,
+        clientTransactionIDsByOperation: [String: String] = [:],
+        operationIDOverrides: [String: String] = [:]
+    ) {
         self.cookieHeader = cookieHeader
         self.csrfToken = csrfToken
         self.bearerToken = bearerToken
         self.language = language
+        self.clientTransactionID = clientTransactionID
+        self.clientTransactionIDsByOperation = clientTransactionIDsByOperation
+        self.operationIDOverrides = operationIDOverrides
     }
 }
 
@@ -72,6 +86,47 @@ public struct XPostsPage: Sendable, Equatable {
         self.posts = posts
         self.nextCursor = nextCursor
     }
+}
+
+public enum XSearchTimelineType: String, Sendable, Equatable, CaseIterable {
+    case top
+    case latest
+    case accounts
+    case media
+    case lists
+    case photos
+    case videos
+
+    public var productValue: String {
+        switch self {
+        case .top: return "Top"
+        case .latest: return "Latest"
+        case .accounts: return "Top"
+        case .media: return "Top"
+        case .lists: return "Top"
+        case .photos: return "Top"
+        case .videos: return "Top"
+        }
+    }
+
+    public var filterQueryValue: String? {
+        switch self {
+        case .top: return nil
+        case .latest: return "live"
+        case .accounts: return "user"
+        case .media: return "media"
+        case .lists: return "list"
+        case .photos: return "image"
+        case .videos: return "video"
+        }
+    }
+}
+
+public enum XUserTimelineType: String, Sendable, Equatable, CaseIterable {
+    case posts
+    case replies
+    case media
+    case highlights
 }
 
 public enum XDirectClientError: LocalizedError {

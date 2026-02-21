@@ -120,6 +120,26 @@ public enum XSearchTimelineType: String, Sendable, Equatable, CaseIterable {
         case .videos: return "video"
         }
     }
+
+    public var clientSideMediaKinds: [XMediaKind]? {
+        switch self {
+        case .photos:
+            return [.photo]
+        case .videos:
+            return [.video, .animatedGif]
+        case .top, .latest, .accounts, .media, .lists:
+            return nil
+        }
+    }
+
+    public func filterSearchPosts(_ posts: [XPost]) -> [XPost] {
+        guard let kinds = clientSideMediaKinds else { return posts }
+        return posts.filter { post in
+            post.media.contains { media in
+                kinds.contains(media.kind)
+            }
+        }
+    }
 }
 
 public enum XUserTimelineType: String, Sendable, Equatable, CaseIterable {

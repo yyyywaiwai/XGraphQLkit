@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import XGraphQLkit
 
@@ -32,4 +33,52 @@ import Testing
     #expect(XSearchTimelineType.lists.filterQueryValue == "list")
     #expect(XSearchTimelineType.photos.filterQueryValue == "image")
     #expect(XSearchTimelineType.videos.filterQueryValue == "video")
+
+    #expect(XSearchTimelineType.top.clientSideMediaKinds == nil)
+    #expect(XSearchTimelineType.latest.clientSideMediaKinds == nil)
+    #expect(XSearchTimelineType.accounts.clientSideMediaKinds == nil)
+    #expect(XSearchTimelineType.media.clientSideMediaKinds == nil)
+    #expect(XSearchTimelineType.lists.clientSideMediaKinds == nil)
+    #expect(XSearchTimelineType.photos.clientSideMediaKinds == [.photo])
+    #expect(XSearchTimelineType.videos.clientSideMediaKinds == [.video, .animatedGif])
+}
+
+@Test func searchTimelineType_clientSideMediaFiltering() async throws {
+    let posts = [
+        makePost(id: "p-photo", mediaKinds: [.photo]),
+        makePost(id: "p-video", mediaKinds: [.video]),
+        makePost(id: "p-gif", mediaKinds: [.animatedGif]),
+        makePost(id: "p-mixed", mediaKinds: [.photo, .video]),
+        makePost(id: "p-none", mediaKinds: [])
+    ]
+
+    let photos = XSearchTimelineType.photos.filterSearchPosts(posts)
+    #expect(photos.map(\.id) == ["p-photo", "p-mixed"])
+
+    let videos = XSearchTimelineType.videos.filterSearchPosts(posts)
+    #expect(videos.map(\.id) == ["p-video", "p-gif", "p-mixed"])
+
+    let top = XSearchTimelineType.top.filterSearchPosts(posts)
+    #expect(top.map(\.id) == posts.map(\.id))
+}
+
+private func makePost(id: String, mediaKinds: [XMediaKind]) -> XPost {
+    let media = mediaKinds.enumerated().map { idx, kind in
+        XMediaItem(
+            id: "\(id)-m\(idx)",
+            kind: kind,
+            url: URL(string: "https://example.com/\(id)-\(idx).mp4")!,
+            thumbnailURL: nil,
+            aspectRatio: nil
+        )
+    }
+    return XPost(
+        id: id,
+        text: id,
+        screenName: "tester",
+        createdAt: nil,
+        createdAtRaw: nil,
+        url: URL(string: "https://x.com/tester/status/\(id)")!,
+        media: media
+    )
 }

@@ -80,7 +80,10 @@ public actor XDirectClient {
             refererPath: searchRefererPath(query: query, querySource: querySource, type: type)
         )
 
-        return parsePostsPage(root: root, fallbackScreenName: "i")
+        let page = parsePostsPage(root: root, fallbackScreenName: "i")
+        // Web側の SearchTimeline だけでは photo/video の分離が弱いケースがあるため補正する。
+        let filteredPosts = type.filterSearchPosts(page.posts)
+        return XPostsPage(posts: filteredPosts, nextCursor: page.nextCursor)
     }
 
     public func listBookmarks(count: Int = 20, cursor: String? = nil) async throws -> XPostsPage {

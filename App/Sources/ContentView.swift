@@ -8,6 +8,7 @@ final class TimelineViewModel: ObservableObject {
         case account
         case search
         case bookmarks
+        case singlePost
 
         var id: String { rawValue }
     }
@@ -17,6 +18,7 @@ final class TimelineViewModel: ObservableObject {
     @Published var screenName: String = "XDevelopers"
     @Published var searchQuery: String = "openai"
     @Published var bookmarkQuery: String = ""
+    @Published var postURL: String = "https://x.com/XDevelopers/status/2025509212844089822"
     @Published var userTimelineType: XUserTimelineType = .posts
     @Published var searchTimelineType: XSearchTimelineType = .top
     @Published var posts: [XPost] = []
@@ -101,6 +103,13 @@ final class TimelineViewModel: ObservableObject {
         case .bookmarks:
             let query = bookmarkQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             debugLog("selection bookmarks query=\(debugShortText(query, maxLength: 90)) mode=\(query.isEmpty ? "list" : "search")")
+        case .singlePost:
+            let rawURL = postURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let info = XDirectClient.parsePostURL(rawURL) {
+                debugLog("selection singlePost url=\(info.normalizedURL.absoluteString) postID=\(info.postID) screenName=\(info.screenName ?? "-") referer=\(info.refererPath)")
+            } else {
+                debugLog("selection singlePost url=\(debugShortText(rawURL, maxLength: 140)) parse=invalid")
+            }
         }
         posts = []
         nextCursor = nil
@@ -177,6 +186,23 @@ final class TimelineViewModel: ObservableObject {
                         cursor: nextCursor
                     )
                 }
+
+            case .singlePost:
+                let rawURL = postURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !rawURL.isEmpty else {
+                    errorMessage = "投稿URLを入力してください。"
+                    debugLog("validation failed: empty postURL", requestID: requestID)
+                    return
+                }
+                guard let info = XDirectClient.parsePostURL(rawURL) else {
+                    errorMessage = "投稿URLの形式が不正です。"
+                    debugLog("validation failed: invalid postURL url=\(debugShortText(rawURL, maxLength: 140))", requestID: requestID)
+                    return
+                }
+
+                debugLog("request singlePost op=TweetResultByRestId/TweetDetail url=\(info.normalizedURL.absoluteString) postID=\(info.postID) referer=\(info.refererPath)", requestID: requestID)
+                let post = try await client.fetchPost(from: rawURL)
+                page = XPostsPage(posts: [post], nextCursor: nil)
             }
 
             posts.append(contentsOf: page.posts)
@@ -284,6 +310,12 @@ struct ContentView: View {
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
                                     .textFieldStyle(.roundedBorder)
+
+                            case .singlePost:
+                                TextField("投稿URL (https://x.com/.../status/<id>)", text: $vm.postURL)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.roundedBorder)
                             }
 
                             HStack {
@@ -363,6 +395,7 @@ private extension TimelineViewModel.Source {
         case .account: return "アカウント"
         case .search: return "検索"
         case .bookmarks: return "ブックマーク"
+        case .singlePost: return "投稿URL"
         }
     }
 }

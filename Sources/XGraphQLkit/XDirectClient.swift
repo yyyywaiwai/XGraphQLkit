@@ -22,6 +22,61 @@ public actor XDirectClient {
         self.debugLog = debugLog
     }
 
+    public static func parsePostURL(_ url: URL) -> XPostURLInfo? {
+        parsePostURLInternal(url)
+    }
+
+    public static func parsePostURL(_ urlString: String) -> XPostURLInfo? {
+        guard let url = URL(string: urlString) else { return nil }
+        return parsePostURLInternal(url)
+    }
+
+    public func fetchPost(from postURL: URL) async throws -> XPost {
+        guard let info = Self.parsePostURL(postURL) else {
+            throw XDirectClientError.invalidPostURL(postURL.absoluteString)
+        }
+
+        let fallbackScreenName = info.screenName ?? "i"
+        let candidates = singlePostRequests(postID: info.postID, refererPath: info.refererPath)
+        var didReachSuccessStatus = false
+
+        for candidate in candidates {
+            do {
+                let root = try await requestGraphQL(
+                    operationName: candidate.operationName,
+                    variables: candidate.variables,
+                    refererPath: candidate.refererPath
+                )
+                didReachSuccessStatus = true
+                if let post = findPostByID(in: root, postID: info.postID, fallbackScreenName: fallbackScreenName) {
+                    return post
+                }
+            } catch let XDirectClientError.operationNotFound(operationName) {
+                logDebug("[FETCH_POST] skip missing operation op=\(operationName)")
+                continue
+            } catch let XDirectClientError.badStatus(status, body) {
+                // operationごとに必要変数が異なるため、400/404は次候補を試す。
+                if status == 400 || status == 404 {
+                    logDebug("[FETCH_POST] retry op=\(candidate.operationName) status=\(status) body=\(String(body.prefix(120)))")
+                    continue
+                }
+                throw XDirectClientError.badStatus(status: status, body: body)
+            }
+        }
+
+        if didReachSuccessStatus {
+            throw XDirectClientError.postNotFound(info.postID)
+        }
+        throw XDirectClientError.operationNotFound("TweetResultByRestId / TweetDetail")
+    }
+
+    public func fetchPost(from postURLString: String) async throws -> XPost {
+        guard let url = URL(string: postURLString) else {
+            throw XDirectClientError.invalidPostURL(postURLString)
+        }
+        return try await fetchPost(from: url)
+    }
+
     public func listUserPosts(screenName: String, count: Int = 20, cursor: String? = nil) async throws -> XPostsPage {
         try await listUserPosts(
             screenName: screenName,
@@ -149,6 +204,12 @@ public actor XDirectClient {
         let variables: [String: Any]
     }
 
+    private struct SinglePostRequest {
+        let operationName: String
+        let refererPath: String
+        let variables: [String: Any]
+    }
+
     private func userTimelineRequest(
         screenName: String,
         userId: String,
@@ -217,6 +278,34 @@ public actor XDirectClient {
             return "/search?\(query)"
         }
         return "/search"
+    }
+
+    private func singlePostRequests(postID: String, refererPath: String) -> [SinglePostRequest] {
+        [
+            SinglePostRequest(
+                operationName: "TweetResultByRestId",
+                refererPath: refererPath,
+                variables: [
+                    "tweetId": postID,
+                    "withCommunity": true,
+                    "includePromotedContent": false,
+                    "withVoice": true
+                ]
+            ),
+            SinglePostRequest(
+                operationName: "TweetDetail",
+                refererPath: refererPath,
+                variables: [
+                    "focalTweetId": postID,
+                    "with_rux_injections": false,
+                    "includePromotedContent": true,
+                    "withCommunity": true,
+                    "withQuickPromoteEligibilityTweetFields": true,
+                    "withBirdwatchNotes": false,
+                    "withVoice": true
+                ]
+            )
+        ]
     }
 
     private func normalizedCount(_ count: Int) -> Int {
@@ -867,6 +956,31 @@ public actor XDirectClient {
         return nil
     }
 
+    private func findPostByID(
+        in node: Any,
+        postID: String,
+        fallbackScreenName: String
+    ) -> XPost? {
+        if let dict = node as? [String: Any] {
+            if let post = toPost(from: dict, fallbackScreenName: fallbackScreenName),
+               post.id == postID {
+                return post
+            }
+            for value in dict.values {
+                if let found = findPostByID(in: value, postID: postID, fallbackScreenName: fallbackScreenName) {
+                    return found
+                }
+            }
+        } else if let array = node as? [Any] {
+            for value in array {
+                if let found = findPostByID(in: value, postID: postID, fallbackScreenName: fallbackScreenName) {
+                    return found
+                }
+            }
+        }
+        return nil
+    }
+
     private func jsonValue(at path: [String], in root: Any) -> Any? {
         var current: Any? = root
         for key in path {
@@ -904,4 +1018,115 @@ public actor XDirectClient {
         formatter.dateFormat = "EEE MMM dd HH:mm:ss Z yyyy"
         return formatter.date(from: raw)
     }
+
+    private static func parsePostURLInternal(_ inputURL: URL) -> XPostURLInfo? {
+        guard var components = URLComponents(url: inputURL, resolvingAgainstBaseURL: false),
+              let rawHost = components.host?.lowercased()
+        else {
+            return nil
+        }
+
+        if let scheme = components.scheme?.lowercased(),
+           scheme != "http",
+           scheme != "https" {
+            return nil
+        }
+
+        guard supportedPostHosts.contains(rawHost) else {
+            return nil
+        }
+
+        let pathComponents = components.path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard let statusIndex = pathComponents.firstIndex(where: { $0.lowercased() == "status" }),
+              pathComponents.count > statusIndex + 1
+        else {
+            return nil
+        }
+
+        let postID = pathComponents[statusIndex + 1]
+        guard isValidPostID(postID) else {
+            return nil
+        }
+
+        let rawScreenName = statusIndex > 0 ? pathComponents[statusIndex - 1] : nil
+        let screenName = normalizedScreenName(rawScreenName, pathComponents: pathComponents, statusIndex: statusIndex)
+
+        let refererPath: String
+        if let screenName {
+            refererPath = "/\(screenName)/status/\(postID)"
+        } else {
+            refererPath = "/i/web/status/\(postID)"
+        }
+
+        components.scheme = "https"
+        components.host = "x.com"
+        components.percentEncodedPath = refererPath
+        components.query = nil
+        components.fragment = nil
+        guard let normalizedURL = components.url else {
+            return nil
+        }
+
+        return XPostURLInfo(
+            originalURL: inputURL,
+            normalizedURL: normalizedURL,
+            host: rawHost,
+            screenName: screenName,
+            postID: postID,
+            refererPath: refererPath
+        )
+    }
+
+    private static func normalizedScreenName(
+        _ rawValue: String?,
+        pathComponents: [String],
+        statusIndex: Int
+    ) -> String? {
+        guard let rawValue, !rawValue.isEmpty else {
+            return nil
+        }
+
+        let lower = rawValue.lowercased()
+        if reservedPathSegmentsForScreenName.contains(lower) {
+            return nil
+        }
+
+        if statusIndex >= 2,
+           pathComponents[statusIndex - 2].lowercased() == "i" {
+            return nil
+        }
+
+        guard rawValue.range(of: #"^[A-Za-z0-9_]{1,20}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return rawValue
+    }
+
+    private static func isValidPostID(_ value: String) -> Bool {
+        value.range(of: #"^[0-9]{5,30}$"#, options: .regularExpression) != nil
+    }
+
+    private static let supportedPostHosts: Set<String> = [
+        "x.com",
+        "www.x.com",
+        "twitter.com",
+        "www.twitter.com",
+        "mobile.twitter.com",
+        "mobile.x.com"
+    ]
+
+    private static let reservedPathSegmentsForScreenName: Set<String> = [
+        "home",
+        "i",
+        "intent",
+        "search",
+        "explore",
+        "settings",
+        "messages",
+        "compose",
+        "notifications",
+        "web"
+    ]
 }

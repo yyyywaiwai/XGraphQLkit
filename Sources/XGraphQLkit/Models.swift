@@ -88,6 +88,31 @@ public struct XPostsPage: Sendable, Equatable {
     }
 }
 
+public struct XPostURLInfo: Sendable, Equatable {
+    public let originalURL: URL
+    public let normalizedURL: URL
+    public let host: String
+    public let screenName: String?
+    public let postID: String
+    public let refererPath: String
+
+    public init(
+        originalURL: URL,
+        normalizedURL: URL,
+        host: String,
+        screenName: String?,
+        postID: String,
+        refererPath: String
+    ) {
+        self.originalURL = originalURL
+        self.normalizedURL = normalizedURL
+        self.host = host
+        self.screenName = screenName
+        self.postID = postID
+        self.refererPath = refererPath
+    }
+}
+
 public enum XSearchTimelineType: String, Sendable, Equatable, CaseIterable {
     case top
     case latest
@@ -157,6 +182,8 @@ public enum XDirectClientError: LocalizedError {
     case unauthorized(status: Int)
     case badStatus(status: Int, body: String)
     case userIdNotFound(String)
+    case invalidPostURL(String)
+    case postNotFound(String)
 
     public var errorDescription: String? {
         switch self {
@@ -174,6 +201,10 @@ public enum XDirectClientError: LocalizedError {
             return "HTTP \(status): \(body)"
         case .userIdNotFound(let screenName):
             return "@\(screenName) のuserIdを取得できませんでした。"
+        case .invalidPostURL(let value):
+            return "投稿URLの解析に失敗しました: \(value)"
+        case .postNotFound(let postID):
+            return "投稿を取得できませんでした (postID: \(postID))。"
         }
     }
 }

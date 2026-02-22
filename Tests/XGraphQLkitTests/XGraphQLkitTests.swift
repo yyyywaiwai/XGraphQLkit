@@ -62,6 +62,33 @@ import Testing
     #expect(top.map(\.id) == posts.map(\.id))
 }
 
+@Test func parsePostURL_extractsScreenNameAndPostID() async throws {
+    let input = URL(string: "https://x.com/yyyyyy_public/status/2025509212844089822?s=20")!
+    let info = XDirectClient.parsePostURL(input)
+
+    #expect(info != nil)
+    #expect(info?.screenName == "yyyyyy_public")
+    #expect(info?.postID == "2025509212844089822")
+    #expect(info?.refererPath == "/yyyyyy_public/status/2025509212844089822")
+    #expect(info?.normalizedURL.absoluteString == "https://x.com/yyyyyy_public/status/2025509212844089822")
+}
+
+@Test func parsePostURL_supportsIWebStatusPath() async throws {
+    let input = URL(string: "https://x.com/i/web/status/2025509212844089822")!
+    let info = XDirectClient.parsePostURL(input)
+
+    #expect(info != nil)
+    #expect(info?.screenName == nil)
+    #expect(info?.postID == "2025509212844089822")
+    #expect(info?.refererPath == "/i/web/status/2025509212844089822")
+}
+
+@Test func parsePostURL_rejectsInvalidHostOrPath() async throws {
+    #expect(XDirectClient.parsePostURL(URL(string: "https://example.com/user/status/1234567890")!) == nil)
+    #expect(XDirectClient.parsePostURL(URL(string: "https://x.com/user/likes")!) == nil)
+    #expect(XDirectClient.parsePostURL("not-a-url") == nil)
+}
+
 private func makePost(id: String, mediaKinds: [XMediaKind]) -> XPost {
     let media = mediaKinds.enumerated().map { idx, kind in
         XMediaItem(

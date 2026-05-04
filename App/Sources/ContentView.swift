@@ -406,6 +406,7 @@ private extension XUserTimelineType {
         case .posts: return "投稿"
         case .replies: return "返信"
         case .media: return "メディア"
+        case .videos: return "動画"
         case .highlights: return "ハイライト"
         }
     }
@@ -415,6 +416,7 @@ private extension XUserTimelineType {
         case .posts: return "UserTweets"
         case .replies: return "UserTweetsAndReplies"
         case .media: return "UserMedia"
+        case .videos: return "UserTweets + video filter"
         case .highlights: return "UserHighlightsTweets"
         }
     }
@@ -424,6 +426,7 @@ private extension XUserTimelineType {
         case .posts: return "/\(screenName)"
         case .replies: return "/\(screenName)/with_replies"
         case .media: return "/\(screenName)/media"
+        case .videos: return "/\(screenName)"
         case .highlights: return "/\(screenName)/highlights"
         }
     }

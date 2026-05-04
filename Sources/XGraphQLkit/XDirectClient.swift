@@ -108,7 +108,7 @@ public actor XDirectClient {
         )
 
         let page = parsePostsPage(root: root, fallbackScreenName: screenName)
-        return page
+        return XPostsPage(posts: timeline.filterPosts(page.posts), nextCursor: page.nextCursor)
     }
 
     public func searchPosts(
@@ -242,6 +242,11 @@ public actor XDirectClient {
             variables["includePromotedContent"] = false
             variables["withClientEventToken"] = false
             variables["withBirdwatchNotes"] = false
+        case .videos:
+            operationName = "UserTweets"
+            refererPath = "/\(screenName)"
+            variables["includePromotedContent"] = true
+            variables["withQuickPromoteEligibilityTweetFields"] = true
         case .highlights:
             operationName = "UserHighlightsTweets"
             refererPath = "/\(screenName)/highlights"

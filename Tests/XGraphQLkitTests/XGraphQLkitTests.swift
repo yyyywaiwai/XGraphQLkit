@@ -62,6 +62,22 @@ import Testing
     #expect(top.map(\.id) == posts.map(\.id))
 }
 
+@Test func userTimelineType_videosFiltersVideoPosts() async throws {
+    let posts = [
+        makePost(id: "p-photo", mediaKinds: [.photo]),
+        makePost(id: "p-video", mediaKinds: [.video]),
+        makePost(id: "p-gif", mediaKinds: [.animatedGif]),
+        makePost(id: "p-mixed", mediaKinds: [.photo, .video]),
+        makePost(id: "p-none", mediaKinds: [])
+    ]
+
+    let videos = XUserTimelineType.videos.filterPosts(posts)
+    #expect(videos.map(\.id) == ["p-video", "p-gif", "p-mixed"])
+
+    let regularPosts = XUserTimelineType.posts.filterPosts(posts)
+    #expect(regularPosts.map(\.id) == posts.map(\.id))
+}
+
 @Test func parsePostURL_extractsScreenNameAndPostID() async throws {
     let input = URL(string: "https://x.com/yyyyyy_public/status/2025509212844089822?s=20")!
     let info = XDirectClient.parsePostURL(input)

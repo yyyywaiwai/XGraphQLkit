@@ -171,7 +171,26 @@ public enum XUserTimelineType: String, Sendable, Equatable, CaseIterable {
     case posts
     case replies
     case media
+    case videos
     case highlights
+
+    public var clientSideMediaKinds: [XMediaKind]? {
+        switch self {
+        case .videos:
+            return [.video, .animatedGif]
+        case .posts, .replies, .media, .highlights:
+            return nil
+        }
+    }
+
+    public func filterPosts(_ posts: [XPost]) -> [XPost] {
+        guard let kinds = clientSideMediaKinds else { return posts }
+        return posts.filter { post in
+            post.media.contains { media in
+                kinds.contains(media.kind)
+            }
+        }
+    }
 }
 
 public enum XDirectClientError: LocalizedError {

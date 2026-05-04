@@ -11,7 +11,7 @@ XのWebクライアント用GraphQL (`/i/api/graphql/...`) を iOS から直接�
 ## できること
 - WebViewでログイン後、`ct0` + Cookie + WebクライアントBearerを取得
 - `UserByScreenName` で userId 解決
-- アカウント投稿の種別取得（投稿 / 返信 / メディア / ハイライト）
+- アカウント投稿の種別取得（投稿 / 返信 / メディア / 動画 / ハイライト）
 - 検索タイムラインの種別取得（話題 / 最新 / アカウント / メディア / リスト / 写真 / 動画）
 - ブックマーク一覧取得、ブックマーク内検索
 - 投稿URL (`.../status/<id>`) から単体投稿を取得
@@ -98,6 +98,7 @@ final class VM: ObservableObject {
   - `x-client-transaction-id` は `WKWebView` 上で webpack module を探索しつつ都度生成（`83914.jJ` を優先し、見つからない場合は module cache も走査）
   - `UserByScreenName` / `UserTweets*` / `SearchTimeline` / `Bookmark*` をGETで実行
   - `tweet_results` から投稿を再帰的に抽出
+  - アカウントの `動画` は `UserMedia` では拾えない引用・再利用動画に対応するため、`UserTweets` から動画付き投稿だけをクライアント側で抽出
 
 ## 統合テスト
 - `Tests/XGraphQLkitTests/XDirectClientIntegrationTests.swift` は `.env` から認証値を読みます。

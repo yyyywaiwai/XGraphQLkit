@@ -186,12 +186,16 @@ public actor XDirectClient {
             operationName: "UserByScreenName",
             variables: [
                 "screen_name": screenName,
+                "screenName": screenName,
                 "withGrokTranslatedBio": false
             ],
             refererPath: "/\(screenName)"
         )
 
         if let id = jsonValue(at: ["data", "user", "result", "rest_id"], in: root) as? String {
+            return id
+        }
+        if let id = jsonValue(at: ["data", "user_result_by_screen_name", "result", "user", "rest_id"], in: root) as? String {
             return id
         }
 

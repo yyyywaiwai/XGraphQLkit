@@ -24,7 +24,7 @@ public enum XAuthCapture {
     }
 
     public static func findMainScriptURL(session: URLSession = .shared) async throws -> URL {
-        let html = try await fetchText(from: URL(string: "https://x.com")!, session: session)
+        let html = try await fetchHomeHTML(session: session)
         let scriptURLs = scriptURLs(in: html)
 
         if let url = scriptURLs.first(where: { $0.absoluteString.contains("/responsive-web/client-web/main.") }) {
@@ -42,8 +42,23 @@ public enum XAuthCapture {
         throw XDirectClientError.bearerTokenNotFound
     }
 
+    static func fetchHomeHTML(session: URLSession) async throws -> String {
+        try await fetchText(from: URL(string: "https://x.com")!, session: session)
+    }
+
+    static func fetchScriptText(from url: URL, session: URLSession) async throws -> String {
+        try await fetchText(from: url, session: session)
+    }
+
     private static func fetchText(from url: URL, session: URLSession) async throws -> String {
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw XDirectClientError.invalidResponse
         }
@@ -67,15 +82,20 @@ public enum XAuthCapture {
     }
 
     static func scriptURLs(in html: String) -> [URL] {
+        javaScriptAssetURLs(in: html, baseURL: URL(string: "https://x.com")!)
+    }
+
+    static func javaScriptAssetURLs(in text: String, baseURL: URL) -> [URL] {
         let patterns = [
-            #"https://abs\.twimg\.com/responsive-web/client-web/[^"' <>\n\r]+\.js"#,
-            #"https://abs\.twimg\.com/x-web/x-web/assets/[^"' <>\n\r]+\.js"#,
-            #"(?:src|href)\s*=\s*["']([^"']+\.js)["']"#
+            #"https://abs\.twimg\.com/responsive-web/client-web/[^"'` <>\n\r]+\.js"#,
+            #"https://abs\.twimg\.com/x-web/x-web/assets/[^"'` <>\n\r]+\.js"#,
+            #"(?:src|href)\s*=\s*["']([^"']+\.js)["']"#,
+            #"["'`]((?:\./|assets/)[A-Za-z0-9_./-]+\.js)["'`]"#
         ]
 
         var urls: [URL] = []
         var seen = Set<String>()
-        let ns = html as NSString
+        let ns = text as NSString
         let searchRange = NSRange(location: 0, length: ns.length)
 
         func append(_ raw: String) {
@@ -84,8 +104,10 @@ public enum XAuthCapture {
                 resolved = URL(string: "https:\(raw)")
             } else if let url = URL(string: raw), url.scheme != nil {
                 resolved = url
+            } else if raw.hasPrefix("assets/") {
+                resolved = URL(string: raw, relativeTo: URL(string: "https://abs.twimg.com/x-web/x-web/")!)?.absoluteURL
             } else {
-                resolved = URL(string: raw, relativeTo: URL(string: "https://x.com")!)?.absoluteURL
+                resolved = URL(string: raw, relativeTo: baseURL)?.absoluteURL
             }
 
             guard let url = resolved else { return }
@@ -97,7 +119,7 @@ public enum XAuthCapture {
 
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            for match in regex.matches(in: html, options: [], range: searchRange) {
+            for match in regex.matches(in: text, options: [], range: searchRange) {
                 let captureRange = match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound
                     ? match.range(at: 1)
                     : match.range(at: 0)
@@ -106,6 +128,20 @@ public enum XAuthCapture {
         }
 
         return urls
+    }
+
+    static func prioritizedOperationScriptURLs(from html: String, operationName: String) -> [URL] {
+        scriptURLs(in: html)
+            .enumerated()
+            .sorted { lhs, rhs in
+                let leftScore = operationScriptPriority(lhs.element, operationName: operationName)
+                let rightScore = operationScriptPriority(rhs.element, operationName: operationName)
+                if leftScore == rightScore {
+                    return lhs.offset < rhs.offset
+                }
+                return leftScore < rightScore
+            }
+            .map(\.element)
     }
 
     static func prioritizedScriptURLs(from html: String) -> [URL] {
@@ -129,6 +165,40 @@ public enum XAuthCapture {
         if value.contains("/responsive-web/client-web/") { return 2 }
         if value.contains("/x-web/x-web/assets/") { return 3 }
         return 10
+    }
+
+    static func operationScriptPriority(_ url: URL, operationName: String) -> Int {
+        let value = url.absoluteString.lowercased()
+
+        let keywords: [String]
+        switch operationName {
+        case "UserByScreenName":
+            keywords = ["user-profile", "_profile", "profile", "followers", "following"]
+        case "UserTweets":
+            keywords = ["_profile", "generic-timeline", "timeline", "tweet-results", "user-profile"]
+        case "UserTweetsAndReplies":
+            keywords = ["with_replies", "_profile", "generic-timeline", "timeline", "tweet-results"]
+        case "UserMedia":
+            keywords = ["media", "_profile", "generic-timeline", "timeline", "tweet-results"]
+        case "UserHighlightsTweets":
+            keywords = ["highlights", "_profile", "generic-timeline", "timeline", "tweet-results"]
+        case "SearchTimeline", "BookmarkSearchTimeline":
+            keywords = ["search", "explore", "global-trending", "timeline", "generic-timeline"]
+        case "Bookmarks":
+            keywords = ["bookmark", "timeline", "generic-timeline"]
+        case "TweetResultByRestId", "TweetDetail":
+            keywords = ["tweet-result", "conversation", "status", "_id", "tweet"]
+        default:
+            keywords = []
+        }
+
+        if let index = keywords.firstIndex(where: { value.contains($0) }) {
+            return index
+        }
+        if value.contains("/responsive-web/client-web/main.") { return 20 }
+        if value.contains("/responsive-web/client-web/") { return 30 }
+        if value.contains("/x-web/x-web/assets/") { return 40 }
+        return 100
     }
 
     #if canImport(WebKit)

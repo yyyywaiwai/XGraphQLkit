@@ -5,8 +5,8 @@ public actor XDirectClient {
     private let session: URLSession
     private let debugLog: (@Sendable (String) -> Void)?
     private var operationCache: [String: String] = [:]
-    private var operationCacheLoadedFromMainScript = false
-    private var mainScriptBodyCache: String?
+    private var operationDiscoveryAttempted: Set<String> = []
+    private var fetchedOperationScriptURLs: Set<String> = []
     private var clientTransactionIDUsageIndexByOperation: [String: Int] = [:]
     private static let operationIDFallback: [String: String] = [
         "Bookmarks": "toTC7lB_mQm5fuBE5yyEJw"
@@ -658,19 +658,17 @@ public actor XDirectClient {
             return cached
         }
 
-        // main.js から operationName -> queryId をまとめて抽出してキャッシュする。
-        if !operationCacheLoadedFromMainScript {
-            let scriptBody = try await mainScriptBody()
-            let extracted = XOperationIDExtractor.extractOperationIDs(from: scriptBody)
-            for (op, id) in extracted {
-                operationCache[op] = id
+        if !operationDiscoveryAttempted.contains(operationName) {
+            operationDiscoveryAttempted.insert(operationName)
+            do {
+                try await discoverOperationIDs(preferredOperationName: operationName)
+            } catch {
+                logDebug("[OPID] discovery failed op=\(operationName) error=\(error)")
             }
-            operationCacheLoadedFromMainScript = true
-            logDebug("[OPID] main.js loaded ops=\(extracted.count)")
         }
 
         if let id = operationCache[operationName] {
-            logDebug("[OPID] main.js hit op=\(operationName) id=\(id)")
+            logDebug("[OPID] discovered hit op=\(operationName) id=\(id)")
             return id
         }
 
@@ -694,20 +692,64 @@ public actor XDirectClient {
         throw XDirectClientError.operationNotFound(operationName)
     }
 
-    private func mainScriptBody() async throws -> String {
-        if let cached = mainScriptBodyCache {
-            return cached
+    private func discoverOperationIDs(preferredOperationName operationName: String) async throws {
+        let html = try await XAuthCapture.fetchHomeHTML(session: session)
+        var queuedURLs = XAuthCapture.prioritizedOperationScriptURLs(from: html, operationName: operationName)
+        var queuedURLStrings = Set(queuedURLs.map(\.absoluteString))
+        var fetchedCount = 0
+        let maxFetchCount = 80
+
+        while !queuedURLs.isEmpty, fetchedCount < maxFetchCount {
+            queuedURLs.sort {
+                let left = XAuthCapture.operationScriptPriority($0, operationName: operationName)
+                let right = XAuthCapture.operationScriptPriority($1, operationName: operationName)
+                if left == right {
+                    return $0.absoluteString < $1.absoluteString
+                }
+                return left < right
+            }
+
+            let scriptURL = queuedURLs.removeFirst()
+            queuedURLStrings.remove(scriptURL.absoluteString)
+            guard fetchedOperationScriptURLs.insert(scriptURL.absoluteString).inserted else {
+                continue
+            }
+
+            let scriptBody: String
+            do {
+                scriptBody = try await XAuthCapture.fetchScriptText(from: scriptURL, session: session)
+            } catch {
+                logDebug("[OPID] skip url=\(scriptURL.absoluteString) error=\(error)")
+                continue
+            }
+
+            fetchedCount += 1
+            let extracted = XOperationIDExtractor.extractOperationIDs(from: scriptBody)
+            for (op, id) in extracted {
+                operationCache[op] = id
+            }
+
+            if !extracted.isEmpty {
+                let sample = extracted.keys.sorted().prefix(8).joined(separator: ",")
+                logDebug("[OPID] extracted url=\(scriptURL.lastPathComponent) ops=\(extracted.count) sample=[\(sample)]")
+            }
+
+            if operationCache[operationName] != nil {
+                logDebug("[OPID] discovered op=\(operationName) after=\(fetchedCount)")
+                return
+            }
+
+            let nestedURLs = XAuthCapture.javaScriptAssetURLs(in: scriptBody, baseURL: scriptURL)
+            for nestedURL in nestedURLs {
+                let absolute = nestedURL.absoluteString
+                guard !fetchedOperationScriptURLs.contains(absolute), queuedURLStrings.insert(absolute).inserted else {
+                    continue
+                }
+                queuedURLs.append(nestedURL)
+            }
         }
 
-        let scriptURL = try await XAuthCapture.findMainScriptURL(session: session)
-        logDebug("[OPID] main.js url=\(scriptURL.absoluteString)")
-        let (data, response) = try await session.data(from: scriptURL)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw XDirectClientError.invalidResponse
-        }
-        let body = String(data: data, encoding: .utf8) ?? ""
-        mainScriptBodyCache = body
-        return body
+        logDebug("[OPID] discovery miss op=\(operationName) fetched=\(fetchedCount) cache.count=\(operationCache.count)")
     }
 
     private func logDebug(_ message: String) {

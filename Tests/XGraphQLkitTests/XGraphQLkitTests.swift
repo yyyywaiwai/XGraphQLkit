@@ -17,6 +17,19 @@ import Testing
     #expect(map["SomeOp"] == "MiXeD5555MiXeD6666MiXeD7777MiXeD8888")
 }
 
+@Test func extractOperationIDs_handlesRelayParamsIDAndName() async throws {
+    let body = #"""
+    var O = {
+      fragment:{name:`UserByScreenName`},
+      params:{id:`iAhB7PpOVltiFEfQBeA40Q`,metadata:{},name:`UserByScreenName`,operationKind:`query`,text:null}
+    };
+    """#
+
+    let map = XOperationIDExtractor.extractOperationIDs(from: body)
+
+    #expect(map["UserByScreenName"] == "iAhB7PpOVltiFEfQBeA40Q")
+}
+
 @Test func authCapture_scriptURLsSupportLegacyAndXWebAssets() async throws {
     let html = #"""
     <link rel="modulepreload" href="https://abs.twimg.com/x-web/x-web/assets/chunk-DhL7OvcY.js">
@@ -33,6 +46,19 @@ import Testing
 
     let prioritized = XAuthCapture.prioritizedScriptURLs(from: html).map(\.absoluteString)
     #expect(prioritized.first == "https://abs.twimg.com/x-web/x-web/assets/guest-token-pxm0d9yq.js")
+}
+
+@Test func authCapture_resolvesNestedXWebAssetReferences() async throws {
+    let script = #"""
+    import("./user-profile-D6pmWWzj.js");
+    const deps = ["assets/generic-timeline-BXqNE4XM.js"];
+    """#
+    let baseURL = URL(string: "https://abs.twimg.com/x-web/x-web/assets/_profile-B78i3Kpo.js")!
+
+    let urls = XAuthCapture.javaScriptAssetURLs(in: script, baseURL: baseURL).map(\.absoluteString)
+
+    #expect(urls.contains("https://abs.twimg.com/x-web/x-web/assets/user-profile-D6pmWWzj.js"))
+    #expect(urls.contains("https://abs.twimg.com/x-web/x-web/assets/generic-timeline-BXqNE4XM.js"))
 }
 
 @Test func authCapture_extractsBearerTokenFromXWebGuestTokenAsset() async throws {

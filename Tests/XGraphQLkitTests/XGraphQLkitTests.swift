@@ -17,6 +17,31 @@ import Testing
     #expect(map["SomeOp"] == "MiXeD5555MiXeD6666MiXeD7777MiXeD8888")
 }
 
+@Test func authCapture_scriptURLsSupportLegacyAndXWebAssets() async throws {
+    let html = #"""
+    <link rel="modulepreload" href="https://abs.twimg.com/x-web/x-web/assets/chunk-DhL7OvcY.js">
+    <link rel="modulepreload" href="https://abs.twimg.com/x-web/x-web/assets/guest-token-pxm0d9yq.js">
+    <script src="https://abs.twimg.com/responsive-web/client-web/main.123abc.js"></script>
+    <script src="/relative/app.js"></script>
+    """#
+
+    let urls = XAuthCapture.scriptURLs(in: html).map(\.absoluteString)
+    #expect(urls.contains("https://abs.twimg.com/x-web/x-web/assets/chunk-DhL7OvcY.js"))
+    #expect(urls.contains("https://abs.twimg.com/x-web/x-web/assets/guest-token-pxm0d9yq.js"))
+    #expect(urls.contains("https://abs.twimg.com/responsive-web/client-web/main.123abc.js"))
+    #expect(urls.contains("https://x.com/relative/app.js"))
+
+    let prioritized = XAuthCapture.prioritizedScriptURLs(from: html).map(\.absoluteString)
+    #expect(prioritized.first == "https://abs.twimg.com/x-web/x-web/assets/guest-token-pxm0d9yq.js")
+}
+
+@Test func authCapture_extractsBearerTokenFromXWebGuestTokenAsset() async throws {
+    let token = "AAAAA_TEST_BEARER_TOKEN_FOR_UNIT_TESTS_ONLY_000000"
+    let script = #"n.set(`Authorization`,`Bearer \#(token)`)"#
+
+    #expect(XAuthCapture.firstBearerToken(in: script) == token)
+}
+
 @Test func searchTimelineType_productAndFilterMapping() async throws {
     #expect(XSearchTimelineType.top.productValue == "Top")
     #expect(XSearchTimelineType.latest.productValue == "Latest")

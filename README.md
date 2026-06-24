@@ -92,7 +92,7 @@ final class VM: ObservableObject {
 ## 実装メモ
 - `XAuthCapture`:
   - `WKHTTPCookieStore` から Cookie/ct0 を抽出
-  - `https://x.com` の `main.*.js` から Bearer を抽出
+  - `https://x.com` の legacy `main.*.js` / `x-web` asset から Bearer を抽出
 - `XDirectClient`:
   - `main.*.js` から `operationName -> queryId` を動的抽出
   - `x-client-transaction-id` は `WKWebView` 上で webpack module を探索しつつ都度生成（`83914.jJ` を優先し、見つからない場合は module cache も走査）

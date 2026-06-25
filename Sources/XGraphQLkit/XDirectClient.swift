@@ -387,10 +387,12 @@ public actor XDirectClient {
                     extraFieldToggles: extraFieldToggles
                 )
             } catch let XDirectClientError.badStatus(status, body) {
-                guard status == 400 else { throw XDirectClientError.badStatus(status: status, body: body) }
+                guard XGraphQLValidationRecovery.isRetryableStatus(status) else {
+                    throw XDirectClientError.badStatus(status: status, body: body)
+                }
 
-                let missingFeatures = missingKeysFromValidationError(body: body, kind: .features)
-                let missingFieldToggles = missingKeysFromValidationError(body: body, kind: .fieldToggles)
+                let missingFeatures = XGraphQLValidationRecovery.missingKeys(from: body, kind: .features)
+                let missingFieldToggles = XGraphQLValidationRecovery.missingKeys(from: body, kind: .fieldToggles)
 
                 if missingFeatures.isEmpty && missingFieldToggles.isEmpty {
                     throw XDirectClientError.badStatus(status: status, body: body)
@@ -536,60 +538,12 @@ public actor XDirectClient {
             if http.statusCode == 401 || http.statusCode == 403 {
                 throw XDirectClientError.unauthorized(status: http.statusCode)
             }
-            // 400 は不足features/fieldTogglesの抽出に本文が必要なので少し長めに保持する
-            let limit = (http.statusCode == 400) ? 10_000 : 350
+            // validation系は不足features/fieldTogglesの抽出に本文が必要なので少し長めに保持する
+            let limit = XGraphQLValidationRecovery.isRetryableStatus(http.statusCode) ? 10_000 : 350
             throw XDirectClientError.badStatus(status: http.statusCode, body: String(responseBody.prefix(limit)))
         }
 
         return try JSONSerialization.jsonObject(with: data, options: [])
-    }
-
-    private enum ValidationMissingKind {
-        case features
-        case fieldToggles
-
-        var needle: String {
-            switch self {
-            case .features: return "features cannot be null:"
-            case .fieldToggles: return "fieldToggles cannot be null:"
-            }
-        }
-    }
-
-    private func missingKeysFromValidationError(body: String, kind: ValidationMissingKind) -> [String] {
-        // examples:
-        // "The following features cannot be null: rweb_video_screen_enabled"
-        // "The following features cannot be null: a, b, c"
-        let lower = body.lowercased()
-        guard let startRange = lower.range(of: kind.needle) else { return [] }
-        let offset = lower.distance(from: lower.startIndex, to: startRange.upperBound)
-        guard let bodyNeedleEnd = body.index(body.startIndex, offsetBy: offset, limitedBy: body.endIndex) else {
-            return []
-        }
-
-        let afterNeedle = body[bodyNeedleEnd...]
-        // stop at the next quote if present
-        let segment: Substring
-        if let quote = afterNeedle.firstIndex(of: "\"") {
-            segment = afterNeedle[..<quote]
-        } else if let brace = afterNeedle.firstIndex(of: "}") {
-            segment = afterNeedle[..<brace]
-        } else {
-            segment = afterNeedle
-        }
-
-        let raw = segment
-            .replacingOccurrences(of: "\\n", with: " ")
-            .replacingOccurrences(of: "\\t", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if raw.isEmpty { return [] }
-
-        return raw
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }
-            .filter { !$0.isEmpty }
     }
 
     private func defaultFieldToggles(for operationName: String) -> [String: Any]? {
@@ -785,7 +739,9 @@ public actor XDirectClient {
         }
 
         let items = errors.prefix(4).map { error -> String in
-            let code = ((error["extensions"] as? [String: Any])?["code"] as? String) ?? "-"
+            let code = (error["code"] as? String)
+                ?? ((error["extensions"] as? [String: Any])?["code"] as? String)
+                ?? "-"
             let message = (error["message"] as? String) ?? "(no message)"
             return "\(code):\(message)"
         }

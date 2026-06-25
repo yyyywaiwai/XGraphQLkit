@@ -129,6 +129,31 @@ import Testing
     #expect(regularPosts.map(\.id) == posts.map(\.id))
 }
 
+@Test func graphQLValidationRecovery_retriesHTTP422AndExtractsMissingKeys() async throws {
+    let featuresBody = #"""
+    {"errors":[{"code":"GRAPHQL_VALIDATION_FAILED","message":"The following features cannot be null: responsive_web_next_feature_enabled, rweb_new_media_tab_enabled."}]}
+    """#
+    let fieldTogglesBody = #"""
+    {"errors":[{"code":"GRAPHQL_VALIDATION_FAILED","message":"The following fieldToggles cannot be null: withArticlePlainText"}]}
+    """#
+
+    #expect(XGraphQLValidationRecovery.isRetryableStatus(400))
+    #expect(XGraphQLValidationRecovery.isRetryableStatus(422))
+    #expect(!XGraphQLValidationRecovery.isRetryableStatus(429))
+
+    #expect(
+        XGraphQLValidationRecovery.missingKeys(from: featuresBody, kind: .features) == [
+            "responsive_web_next_feature_enabled",
+            "rweb_new_media_tab_enabled"
+        ]
+    )
+    #expect(
+        XGraphQLValidationRecovery.missingKeys(from: fieldTogglesBody, kind: .fieldToggles) == [
+            "withArticlePlainText"
+        ]
+    )
+}
+
 @Test func parsePostURL_extractsScreenNameAndPostID() async throws {
     let input = URL(string: "https://x.com/yyyyyy_public/status/2025509212844089822?s=20")!
     let info = XDirectClient.parsePostURL(input)

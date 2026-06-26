@@ -195,14 +195,28 @@ public actor XDirectClient {
             refererPath: "/\(screenName)"
         )
 
-        if let id = jsonValue(at: ["data", "user", "result", "rest_id"], in: root) as? String {
-            return id
-        }
-        if let id = jsonValue(at: ["data", "user_result_by_screen_name", "result", "user", "rest_id"], in: root) as? String {
+        if let id = Self.userID(fromUserByScreenNameRoot: root) {
             return id
         }
 
         throw XDirectClientError.userIdNotFound(screenName)
+    }
+
+    static func userID(fromUserByScreenNameRoot root: Any) -> String? {
+        let paths = [
+            ["data", "user", "result", "rest_id"],
+            ["data", "user_result_by_screen_name", "result", "rest_id"],
+            ["data", "user_result_by_screen_name", "result", "user", "rest_id"]
+        ]
+
+        for path in paths {
+            guard let id = jsonValue(at: path, in: root) as? String, !id.isEmpty else {
+                continue
+            }
+            return id
+        }
+
+        return nil
     }
 
     private struct UserTimelineRequest {
@@ -995,7 +1009,7 @@ public actor XDirectClient {
         return nil
     }
 
-    private func jsonValue(at path: [String], in root: Any) -> Any? {
+    private static func jsonValue(at path: [String], in root: Any) -> Any? {
         var current: Any? = root
         for key in path {
             guard let dict = current as? [String: Any] else { return nil }

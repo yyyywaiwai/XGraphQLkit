@@ -41,6 +41,43 @@ import Testing
     #expect(map["UserByScreenName"] == "_kuJi4oIDFMUU-N285gZWg")
 }
 
+@Test func userByScreenNameUserIDExtraction_handlesCurrentAndLegacyShapes() async throws {
+    let current: [String: Any] = [
+        "data": [
+            "user_result_by_screen_name": [
+                "result": [
+                    "__typename": "User",
+                    "rest_id": "1429332355580235777"
+                ]
+            ]
+        ]
+    ]
+    let legacy: [String: Any] = [
+        "data": [
+            "user_result_by_screen_name": [
+                "result": [
+                    "user": [
+                        "rest_id": "1234567890"
+                    ]
+                ]
+            ]
+        ]
+    ]
+    let older: [String: Any] = [
+        "data": [
+            "user": [
+                "result": [
+                    "rest_id": "9999999999"
+                ]
+            ]
+        ]
+    ]
+
+    #expect(XDirectClient.userID(fromUserByScreenNameRoot: current) == "1429332355580235777")
+    #expect(XDirectClient.userID(fromUserByScreenNameRoot: legacy) == "1234567890")
+    #expect(XDirectClient.userID(fromUserByScreenNameRoot: older) == "9999999999")
+}
+
 @Test func authCapture_scriptURLsSupportLegacyAndXWebAssets() async throws {
     let html = #"""
     <link rel="modulepreload" href="https://abs.twimg.com/x-web/x-web/assets/chunk-DhL7OvcY.js">

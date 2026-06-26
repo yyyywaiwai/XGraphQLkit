@@ -225,9 +225,7 @@ public actor XDirectClient {
         cursor: String?
     ) -> UserTimelineRequest {
         var variables: [String: Any] = [
-            "userId": userId,
-            "count": normalizedCount(count),
-            "withVoice": true
+            "count": normalizedCount(count)
         ]
 
         let operationName: String
@@ -236,29 +234,33 @@ public actor XDirectClient {
         case .posts:
             operationName = "UserTweets"
             refererPath = "/\(screenName)"
-            variables["includePromotedContent"] = true
-            variables["withQuickPromoteEligibilityTweetFields"] = true
+            variables["screenName"] = screenName
             variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .replies:
             operationName = "UserTweetsAndReplies"
             refererPath = "/\(screenName)/with_replies"
+            variables["userId"] = userId
+            variables["withVoice"] = true
             variables["includePromotedContent"] = true
             variables["withCommunity"] = true
         case .media:
             operationName = "UserMedia"
             refererPath = "/\(screenName)/media"
+            variables["userId"] = userId
+            variables["withVoice"] = true
             variables["includePromotedContent"] = false
             variables["withClientEventToken"] = false
             variables["withBirdwatchNotes"] = false
         case .videos:
             operationName = "UserTweets"
             refererPath = "/\(screenName)"
-            variables["includePromotedContent"] = true
-            variables["withQuickPromoteEligibilityTweetFields"] = true
+            variables["screenName"] = screenName
             variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .highlights:
             operationName = "UserHighlightsTweets"
             refererPath = "/\(screenName)/highlights"
+            variables["userId"] = userId
+            variables["withVoice"] = true
             variables["includePromotedContent"] = true
         }
 

@@ -185,11 +185,12 @@ public actor XDirectClient {
     private func resolveUserID(screenName: String) async throws -> String {
         let root = try await requestGraphQL(
             operationName: "UserByScreenName",
-            variables: [
-                "screen_name": screenName,
-                "screenName": screenName,
-                "withGrokTranslatedBio": false
-            ],
+                variables: [
+                    "screen_name": screenName,
+                    "screenName": screenName,
+                    "__relay_internal__pv__appviewerisloggedinprovider": true,
+                    "withGrokTranslatedBio": false
+                ],
             refererPath: "/\(screenName)"
         )
 

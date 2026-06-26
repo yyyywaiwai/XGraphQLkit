@@ -797,17 +797,19 @@ public actor XDirectClient {
             ?? (legacy?["id_str"] as? String)
             ?? (tweet["id_str"] as? String)
 
-        guard let legacy, let restID, !restID.isEmpty else {
+        guard let restID, !restID.isEmpty else {
             return nil
         }
 
-        let text = (legacy["full_text"] as? String) ?? (legacy["text"] as? String) ?? ""
+        let text = postText(from: legacy, tweet: tweet)
         guard !text.isEmpty else { return nil }
 
-        let createdAtRaw = legacy["created_at"] as? String
-        let createdAt = createdAtRaw.flatMap(parseTwitterDate)
+        let createdAtRaw = (legacy?["created_at"] as? String)
+            ?? ((tweet["details"] as? [String: Any])?["created_at_ms"] as? String)
+        let createdAt = (legacy?["created_at"] as? String).flatMap(parseTwitterDate)
+            ?? createdAtRaw.flatMap(parseTwitterMilliseconds)
         let screenName = extractScreenName(from: tweet) ?? fallbackScreenName
-        let media = extractMedia(from: legacy, postID: restID)
+        let media = extractMedia(from: legacy, tweet: tweet, postID: restID)
 
         guard let url = URL(string: "https://x.com/\(screenName)/status/\(restID)") else {
             return nil
@@ -824,12 +826,36 @@ public actor XDirectClient {
         )
     }
 
-    private func extractMedia(from legacy: [String: Any], postID: String) -> [XMediaItem] {
+    private func postText(from legacy: [String: Any]?, tweet: [String: Any]) -> String {
+        if let text = legacy?["full_text"] as? String, !text.isEmpty {
+            return text
+        }
+        if let text = legacy?["text"] as? String, !text.isEmpty {
+            return text
+        }
+        if let details = tweet["details"] as? [String: Any],
+           let text = details["full_text"] as? String,
+           !text.isEmpty {
+            return text
+        }
+        if let noteTweet = tweet["note_tweet"] as? [String: Any],
+           let noteResults = noteTweet["note_tweet_results"] as? [String: Any],
+           let result = noteResults["result"] as? [String: Any],
+           let text = result["text"] as? String,
+           !text.isEmpty {
+            return text
+        }
+        return ""
+    }
+
+    private func extractMedia(from legacy: [String: Any]?, tweet: [String: Any], postID: String) -> [XMediaItem] {
         // 画像/動画は legacy.extended_entities.media が一番揃っていることが多い
-        let containers: [[String: Any]] = [
-            (legacy["extended_entities"] as? [String: Any])?["media"] as? [[String: Any]] ?? [],
-            (legacy["entities"] as? [String: Any])?["media"] as? [[String: Any]] ?? []
+        let legacyContainers: [[String: Any]] = [
+            (legacy?["extended_entities"] as? [String: Any])?["media"] as? [[String: Any]] ?? [],
+            (legacy?["entities"] as? [String: Any])?["media"] as? [[String: Any]] ?? []
         ].flatMap { $0 }
+        let currentContainers = tweet["media_entities2"] as? [[String: Any]] ?? []
+        let containers = legacyContainers + currentContainers
 
         if containers.isEmpty { return [] }
 
@@ -871,29 +897,60 @@ public actor XDirectClient {
     }
 
     private func pickPlaybackURL(from media: [String: Any]) -> URL? {
-        guard let videoInfo = media["video_info"] as? [String: Any],
-              let variants = videoInfo["variants"] as? [[String: Any]] else { return nil }
+        if let videoInfo = media["video_info"] as? [String: Any],
+           let variants = videoInfo["variants"] as? [[String: Any]] {
+            // まずHLS(m3u8)を優先。なければ mp4 の最大bitrate。
+            if let hls = variants.first(where: { ($0["content_type"] as? String)?.contains("mpegurl") == true }),
+               let urlStr = hls["url"] as? String,
+               let url = URL(string: urlStr) {
+                return url
+            }
 
-        // まずHLS(m3u8)を優先。なければ mp4 の最大bitrate。
-        if let hls = variants.first(where: { ($0["content_type"] as? String)?.contains("mpegurl") == true }),
-           let urlStr = hls["url"] as? String,
-           let url = URL(string: urlStr) {
+            var best: (url: URL, bitrate: Int)?
+            for v in variants {
+                guard let ct = v["content_type"] as? String, ct == "video/mp4",
+                      let urlStr = v["url"] as? String,
+                      let url = URL(string: urlStr) else { continue }
+                let br = v["bitrate"] as? Int ?? 0
+                if let current = best {
+                    if br > current.bitrate { best = (url: url, bitrate: br) }
+                } else {
+                    best = (url: url, bitrate: br)
+                }
+            }
+            if let best {
+                return best.url
+            }
+        }
+
+        if let extPlaylists = media["ext_playlists"],
+           let url = firstPlaybackURL(in: extPlaylists) {
             return url
         }
 
-        var best: (url: URL, bitrate: Int)?
-        for v in variants {
-            guard let ct = v["content_type"] as? String, ct == "video/mp4",
-                  let urlStr = v["url"] as? String,
-                  let url = URL(string: urlStr) else { continue }
-            let br = v["bitrate"] as? Int ?? 0
-            if let current = best {
-                if br > current.bitrate { best = (url, br) }
-            } else {
-                best = (url, br)
+        return nil
+    }
+
+    private func firstPlaybackURL(in node: Any) -> URL? {
+        if let string = node as? String,
+           (string.contains(".m3u8") || string.contains(".mp4") || string.contains("video.twimg.com")),
+           let url = URL(string: string) {
+            return url
+        }
+        if let dict = node as? [String: Any] {
+            for value in dict.values {
+                if let url = firstPlaybackURL(in: value) {
+                    return url
+                }
+            }
+        } else if let array = node as? [Any] {
+            for value in array {
+                if let url = firstPlaybackURL(in: value) {
+                    return url
+                }
             }
         }
-        return best?.url
+        return nil
     }
 
     private func aspectRatioFrom(media: [String: Any]) -> Double? {
@@ -1045,6 +1102,11 @@ public actor XDirectClient {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "EEE MMM dd HH:mm:ss Z yyyy"
         return formatter.date(from: raw)
+    }
+
+    private func parseTwitterMilliseconds(_ raw: String) -> Date? {
+        guard let milliseconds = Double(raw) else { return nil }
+        return Date(timeIntervalSince1970: milliseconds / 1000)
     }
 
     private static func parsePostURLInternal(_ inputURL: URL) -> XPostURLInfo? {

@@ -9,6 +9,7 @@ public actor XDirectClient {
     private var fetchedOperationScriptURLs: Set<String> = []
     private var clientTransactionIDUsageIndexByOperation: [String: Int] = [:]
     private static let operationIDFallback: [String: String] = [
+        "UserByScreenName": "_kuJi4oIDFMUU-N285gZWg",
         "Bookmarks": "toTC7lB_mQm5fuBE5yyEJw"
     ]
 

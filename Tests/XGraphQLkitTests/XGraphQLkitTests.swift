@@ -30,6 +30,17 @@ import Testing
     #expect(map["UserByScreenName"] == "iAhB7PpOVltiFEfQBeA40Q")
 }
 
+@Test func extractOperationIDs_handlesCurrentRelayProvidedVariablesShape() async throws {
+    let body = #"""
+    var A={fragment:{argumentDefinitions:[],kind:`Fragment`,metadata:null,name:`UserByScreenName`},
+    params:{id:`_kuJi4oIDFMUU-N285gZWg`,metadata:{},name:`UserByScreenName`,operationKind:`query`,text:null,providedVariables:{__relay_internal__pv__appviewerisloggedinprovider:p}}};
+    """#
+
+    let map = XOperationIDExtractor.extractOperationIDs(from: body)
+
+    #expect(map["UserByScreenName"] == "_kuJi4oIDFMUU-N285gZWg")
+}
+
 @Test func authCapture_scriptURLsSupportLegacyAndXWebAssets() async throws {
     let html = #"""
     <link rel="modulepreload" href="https://abs.twimg.com/x-web/x-web/assets/chunk-DhL7OvcY.js">

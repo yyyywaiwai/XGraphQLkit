@@ -10,6 +10,7 @@ public actor XDirectClient {
     private var clientTransactionIDUsageIndexByOperation: [String: Int] = [:]
     private static let operationIDFallback: [String: String] = [
         "UserByScreenName": "_kuJi4oIDFMUU-N285gZWg",
+        "UserTweets": "38y-L-YTUnJ8q0cWHFs-wA",
         "Bookmarks": "toTC7lB_mQm5fuBE5yyEJw"
     ]
 
@@ -237,6 +238,7 @@ public actor XDirectClient {
             refererPath = "/\(screenName)"
             variables["includePromotedContent"] = true
             variables["withQuickPromoteEligibilityTweetFields"] = true
+            variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .replies:
             operationName = "UserTweetsAndReplies"
             refererPath = "/\(screenName)/with_replies"
@@ -253,6 +255,7 @@ public actor XDirectClient {
             refererPath = "/\(screenName)"
             variables["includePromotedContent"] = true
             variables["withQuickPromoteEligibilityTweetFields"] = true
+            variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .highlights:
             operationName = "UserHighlightsTweets"
             refererPath = "/\(screenName)/highlights"

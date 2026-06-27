@@ -178,7 +178,7 @@ public enum XAuthCapture {
             keywords = ["_profile", "generic-timeline", "timeline", "tweet-results", "user-profile"]
         case "UserTweetsAndReplies":
             keywords = ["with_replies", "_profile", "generic-timeline", "timeline", "tweet-results"]
-        case "UserMedia":
+        case "UserMedia", "mediaQuery":
             keywords = ["media", "_profile", "generic-timeline", "timeline", "tweet-results"]
         case "UserHighlightsTweets":
             keywords = ["highlights", "_profile", "generic-timeline", "timeline", "tweet-results"]

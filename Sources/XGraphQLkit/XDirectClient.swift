@@ -11,6 +11,7 @@ public actor XDirectClient {
     private static let operationIDFallback: [String: String] = [
         "UserByScreenName": "_kuJi4oIDFMUU-N285gZWg",
         "UserTweets": "38y-L-YTUnJ8q0cWHFs-wA",
+        "mediaQuery": "ZtYj940iuuKMSBPRfeOemA",
         "Bookmarks": "toTC7lB_mQm5fuBE5yyEJw"
     ]
 
@@ -94,23 +95,63 @@ public actor XDirectClient {
         count: Int = 20,
         cursor: String? = nil
     ) async throws -> XPostsPage {
-        let userId = try await resolveUserID(screenName: screenName)
-        let request = userTimelineRequest(
+        let request = try await userTimelineRequest(
             screenName: screenName,
-            userId: userId,
             timeline: timeline,
             count: count,
             cursor: cursor
         )
 
+        do {
+            return try await executeUserTimelineRequest(
+                request,
+                timeline: timeline,
+                fallbackScreenName: screenName
+            )
+        } catch {
+            guard timeline == .media, shouldRetryWithLegacyUserMedia(after: error) else {
+                throw error
+            }
+
+            logDebug("[TIMELINE] retry legacy UserMedia after primary mediaQuery error=\(error)")
+            let userId = try await resolveUserID(screenName: screenName)
+            let legacyRequest = legacyUserMediaRequest(
+                screenName: screenName,
+                userId: userId,
+                count: count,
+                cursor: cursor
+            )
+            return try await executeUserTimelineRequest(
+                legacyRequest,
+                timeline: timeline,
+                fallbackScreenName: screenName
+            )
+        }
+    }
+
+    private func executeUserTimelineRequest(
+        _ request: UserTimelineRequest,
+        timeline: XUserTimelineType,
+        fallbackScreenName: String
+    ) async throws -> XPostsPage {
         let root = try await requestGraphQL(
             operationName: request.operationName,
             variables: request.variables,
             refererPath: request.refererPath
         )
-
-        let page = parsePostsPage(root: root, fallbackScreenName: screenName)
+        let page = parsePostsPage(root: root, fallbackScreenName: fallbackScreenName)
         return XPostsPage(posts: timeline.filterPosts(page.posts), nextCursor: page.nextCursor)
+    }
+
+    private func shouldRetryWithLegacyUserMedia(after error: Error) -> Bool {
+        switch error {
+        case XDirectClientError.operationNotFound:
+            return true
+        case XDirectClientError.badStatus(let status, _):
+            return status == 400 || status == 404 || status == 422
+        default:
+            return false
+        }
     }
 
     public func searchPosts(
@@ -233,11 +274,10 @@ public actor XDirectClient {
 
     private func userTimelineRequest(
         screenName: String,
-        userId: String,
         timeline: XUserTimelineType,
         count: Int,
         cursor: String?
-    ) -> UserTimelineRequest {
+    ) async throws -> UserTimelineRequest {
         var variables: [String: Any] = [
             "count": normalizedCount(count)
         ]
@@ -251,6 +291,7 @@ public actor XDirectClient {
             variables["screenName"] = screenName
             variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .replies:
+            let userId = try await resolveUserID(screenName: screenName)
             operationName = "UserTweetsAndReplies"
             refererPath = "/\(screenName)/with_replies"
             variables["userId"] = userId
@@ -258,19 +299,17 @@ public actor XDirectClient {
             variables["includePromotedContent"] = true
             variables["withCommunity"] = true
         case .media:
-            operationName = "UserMedia"
+            operationName = "mediaQuery"
             refererPath = "/\(screenName)/media"
-            variables["userId"] = userId
-            variables["withVoice"] = true
-            variables["includePromotedContent"] = false
-            variables["withClientEventToken"] = false
-            variables["withBirdwatchNotes"] = false
+            variables["screenName"] = screenName
+            variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .videos:
             operationName = "UserTweets"
             refererPath = "/\(screenName)"
             variables["screenName"] = screenName
             variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .highlights:
+            let userId = try await resolveUserID(screenName: screenName)
             operationName = "UserHighlightsTweets"
             refererPath = "/\(screenName)/highlights"
             variables["userId"] = userId
@@ -285,6 +324,30 @@ public actor XDirectClient {
         return UserTimelineRequest(
             operationName: operationName,
             refererPath: refererPath,
+            variables: variables
+        )
+    }
+
+    private func legacyUserMediaRequest(
+        screenName: String,
+        userId: String,
+        count: Int,
+        cursor: String?
+    ) -> UserTimelineRequest {
+        var variables: [String: Any] = [
+            "count": normalizedCount(count),
+            "userId": userId,
+            "withVoice": true,
+            "includePromotedContent": false,
+            "withClientEventToken": false,
+            "withBirdwatchNotes": false
+        ]
+        if let cursor, !cursor.isEmpty {
+            variables["cursor"] = cursor
+        }
+        return UserTimelineRequest(
+            operationName: "UserMedia",
+            refererPath: "/\(screenName)/media",
             variables: variables
         )
     }
@@ -575,7 +638,7 @@ public actor XDirectClient {
                 "withPayments": false,
                 "withAuxiliaryUserLabels": true
             ]
-        case "UserTweets", "UserTweetsAndReplies":
+        case "UserTweets", "UserTweetsAndReplies", "mediaQuery":
             return [
                 "withArticlePlainText": false
             ]
@@ -866,7 +929,9 @@ public actor XDirectClient {
             guard let typeRaw = media["type"] as? String else { continue }
             let kind = XMediaKind(rawValue: typeRaw) ?? (typeRaw == "gif" ? .animatedGif : nil)
 
-            let id = (media["media_key"] as? String) ?? "\(postID)-\(idx)"
+            let id = (media["media_key"] as? String)
+                ?? (media["id_str"] as? String)
+                ?? "\(postID)-\(idx)"
             let thumbURL = (media["media_url_https"] as? String).flatMap(URL.init(string:))
                 ?? (media["media_url"] as? String).flatMap(URL.init(string:))
 
@@ -974,13 +1039,23 @@ public actor XDirectClient {
     }
 
     private func extractScreenName(from result: [String: Any]) -> String? {
-        guard let core = result["core"] as? [String: Any],
-              let userResults = core["user_results"] as? [String: Any],
-              let userResult = userResults["result"] as? [String: Any],
-              let legacy = userResult["legacy"] as? [String: Any] else {
-            return nil
+        let paths = [
+            ["core", "user_results", "result", "legacy", "screen_name"],
+            ["core", "user_results", "result", "core", "screen_name"],
+            ["core", "user_results", "result", "screen_name"],
+            ["user", "core", "screen_name"],
+            ["user", "legacy", "screen_name"]
+        ]
+
+        for path in paths {
+            guard let value = Self.jsonValue(at: path, in: result) as? String,
+                  !value.isEmpty else {
+                continue
+            }
+            return value
         }
-        return legacy["screen_name"] as? String
+
+        return nil
     }
 
     private func unwrapTweetResult(_ result: [String: Any]) -> [String: Any] {
@@ -1019,10 +1094,14 @@ public actor XDirectClient {
 
     private func findBottomCursor(in node: Any) -> String? {
         if let dict = node as? [String: Any] {
-            if let ct = dict["cursorType"] as? String,
+            let cursorType = (dict["cursorType"] as? String) ?? (dict["cursor_type"] as? String)
+            if let ct = cursorType,
                ct.lowercased().contains("bottom"),
                let value = dict["value"] as? String,
                !value.isEmpty {
+                return value
+            }
+            if let value = dict["bottom_cursor"] as? String, !value.isEmpty {
                 return value
             }
             for value in dict.values {

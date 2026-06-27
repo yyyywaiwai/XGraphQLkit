@@ -119,6 +119,7 @@ private enum DotEnv {
             ("X_CLIENT_TRANSACTION_ID_USER_TWEETS", "UserTweets"),
             ("X_CLIENT_TRANSACTION_ID_USER_TWEETS_AND_REPLIES", "UserTweetsAndReplies"),
             ("X_CLIENT_TRANSACTION_ID_USER_MEDIA", "UserMedia"),
+            ("X_CLIENT_TRANSACTION_ID_MEDIA_QUERY", "mediaQuery"),
             ("X_CLIENT_TRANSACTION_ID_USER_HIGHLIGHTS_TWEETS", "UserHighlightsTweets"),
             ("X_CLIENT_TRANSACTION_ID_SEARCH_TIMELINE", "SearchTimeline"),
             ("X_CLIENT_TRANSACTION_ID_BOOKMARKS", "Bookmarks"),
@@ -137,6 +138,9 @@ private enum DotEnv {
         var map: [String: String] = [:]
         if let bookmarks = nonEmptyValue("X_OPERATION_ID_BOOKMARKS", in: env) {
             map["Bookmarks"] = bookmarks
+        }
+        if let mediaQuery = nonEmptyValue("X_OPERATION_ID_MEDIA_QUERY", in: env) {
+            map["mediaQuery"] = mediaQuery
         }
         if let bookmarkSearch = nonEmptyValue("X_OPERATION_ID_BOOKMARK_SEARCH_TIMELINE", in: env) {
             map["BookmarkSearchTimeline"] = bookmarkSearch

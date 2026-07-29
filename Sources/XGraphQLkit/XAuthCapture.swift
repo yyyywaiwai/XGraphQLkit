@@ -11,12 +11,45 @@ public enum XAuthCapture {
             return token
         }
 
-        for scriptURL in prioritizedScriptURLs(from: html) {
+        var queuedURLs = prioritizedScriptURLs(from: html).filter(isTrustedPublicAssetURL)
+        var queuedURLStrings = Set(queuedURLs.map(\.absoluteString))
+        var fetchedURLStrings = Set<String>()
+        var fetchedCount = 0
+        let maxFetchCount = 80
+
+        while !queuedURLs.isEmpty, fetchedCount < maxFetchCount {
+            queuedURLs.sort {
+                let left = scriptPriority($0)
+                let right = scriptPriority($1)
+                if left == right {
+                    return $0.absoluteString < $1.absoluteString
+                }
+                return left < right
+            }
+
+            let scriptURL = queuedURLs.removeFirst()
+            queuedURLStrings.remove(scriptURL.absoluteString)
+            guard fetchedURLStrings.insert(scriptURL.absoluteString).inserted else {
+                continue
+            }
+
             guard let scriptBody = try? await fetchText(from: scriptURL, session: session) else {
                 continue
             }
+            fetchedCount += 1
+
             if let token = firstBearerToken(in: scriptBody) {
                 return token
+            }
+
+            for nestedURL in javaScriptAssetURLs(in: scriptBody, baseURL: scriptURL) {
+                let absolute = nestedURL.absoluteString
+                guard isTrustedPublicAssetURL(nestedURL),
+                      !fetchedURLStrings.contains(absolute),
+                      queuedURLStrings.insert(absolute).inserted else {
+                    continue
+                }
+                queuedURLs.append(nestedURL)
             }
         }
 
@@ -165,6 +198,19 @@ public enum XAuthCapture {
         if value.contains("/responsive-web/client-web/") { return 2 }
         if value.contains("/x-web/x-web/assets/") { return 3 }
         return 10
+    }
+
+    private static func isTrustedPublicAssetURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased() else {
+            return false
+        }
+
+        return host == "abs.twimg.com"
+            || host == "x.com"
+            || host.hasSuffix(".x.com")
+            || host == "twitter.com"
+            || host.hasSuffix(".twitter.com")
     }
 
     static func operationScriptPriority(_ url: URL, operationName: String) -> Int {

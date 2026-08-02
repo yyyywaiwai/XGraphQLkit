@@ -285,11 +285,15 @@ public actor XDirectClient {
         let operationName: String
         let refererPath: String
         switch timeline {
-        case .posts:
+        case .posts, .videos:
+            // 現行 UserTweets は userId 必須。screenName だけだと 422 GRAPHQL_VALIDATION_FAILED になる。
+            let userId = try await resolveUserID(screenName: screenName)
             operationName = "UserTweets"
             refererPath = "/\(screenName)"
-            variables["screenName"] = screenName
-            variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
+            variables["userId"] = userId
+            variables["withVoice"] = true
+            variables["includePromotedContent"] = true
+            variables["withQuickPromoteEligibilityTweetFields"] = true
         case .replies:
             let userId = try await resolveUserID(screenName: screenName)
             operationName = "UserTweetsAndReplies"
@@ -301,11 +305,6 @@ public actor XDirectClient {
         case .media:
             operationName = "mediaQuery"
             refererPath = "/\(screenName)/media"
-            variables["screenName"] = screenName
-            variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
-        case .videos:
-            operationName = "UserTweets"
-            refererPath = "/\(screenName)"
             variables["screenName"] = screenName
             variables["__relay_internal__pv__appviewerisloggedinprovider"] = true
         case .highlights:

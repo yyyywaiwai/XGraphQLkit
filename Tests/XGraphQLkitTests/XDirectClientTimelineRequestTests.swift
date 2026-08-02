@@ -65,7 +65,7 @@ private struct XDirectClientTimelineRequestTests {
         #expect(page.nextCursor == "BOTTOM_MEDIA")
     }
 
-    @Test func videosTimelineUsesUserTweetsWithoutUserLookupAndKeepsCursor() async throws {
+    @Test func videosTimelineResolvesUserIdThenUsesUserTweetsAndKeepsCursor() async throws {
         let recorder = GraphQLRequestRecorder()
         let session = makeStubbedSession { request in
             if isHomeRequest(request) {
@@ -112,15 +112,70 @@ private struct XDirectClientTimelineRequestTests {
             cursor: "CURSOR_TIMELINE"
         )
 
-        #expect(recorder.operationNames == ["UserTweets"])
-        #expect(recorder.variables(for: "UserTweets")?["screenName"] as? String == "yyyyyy_public")
+        #expect(recorder.operationNames == ["UserByScreenName", "UserTweets"])
+        #expect(recorder.variables(for: "UserTweets")?["userId"] as? String == "111")
         #expect(recorder.variables(for: "UserTweets")?["count"] as? Int == 40)
         #expect(recorder.variables(for: "UserTweets")?["cursor"] as? String == "CURSOR_TIMELINE")
-        #expect(recorder.variables(for: "UserTweets")?["userId"] == nil)
+        #expect(recorder.variables(for: "UserTweets")?["screenName"] == nil)
         #expect(page.posts.map(\.id) == ["video-post"])
         #expect(page.nextCursor == "BOTTOM_TIMELINE")
     }
+
+    @Test func postsTimelineResolvesUserIdThenUsesUserTweets() async throws {
+        let recorder = GraphQLRequestRecorder()
+        let session = makeStubbedSession { request in
+            if isHomeRequest(request) {
+                return StubbedResponse(status: 200, body: "<html></html>")
+            }
+
+            let operationName = try graphQLOperationName(from: request)
+            let variables = try graphQLVariables(from: request)
+            recorder.record(operationName: operationName, variables: variables)
+
+            switch operationName {
+            case "UserByScreenName":
+                return StubbedResponse(status: 200, body: userByScreenNameResponse(userID: "222"))
+            case "UserTweets":
+                return StubbedResponse(status: 200, body: timelineResponse(
+                    screenName: "yyyyyy_public",
+                    cursor: "BOTTOM_POSTS",
+                    posts: [
+                        currentTweet(id: "text-post", screenName: "yyyyyy_public", mediaType: "photo")
+                    ]
+                ))
+            default:
+                return StubbedResponse(status: 404, body: "{}")
+            }
+        }
+        defer {
+            session.invalidateAndCancel()
+            GraphQLURLProtocolStub.handler = nil
+        }
+
+        let client = XDirectClient(
+            auth: testAuth(operationIDOverrides: [
+                "UserByScreenName": "user-op",
+                "UserTweets": "tweets-op"
+            ]),
+            session: session
+        )
+
+        let page = try await client.listUserPosts(
+            screenName: "yyyyyy_public",
+            timeline: .posts,
+            count: 20,
+            cursor: "CURSOR_POSTS"
+        )
+
+        #expect(recorder.operationNames == ["UserByScreenName", "UserTweets"])
+        #expect(recorder.variables(for: "UserTweets")?["userId"] as? String == "222")
+        #expect(recorder.variables(for: "UserTweets")?["count"] as? Int == 20)
+        #expect(recorder.variables(for: "UserTweets")?["cursor"] as? String == "CURSOR_POSTS")
+        #expect(page.posts.map(\.id) == ["text-post"])
+        #expect(page.nextCursor == "BOTTOM_POSTS")
+    }
 }
+
 
 private final class GraphQLRequestRecorder: @unchecked Sendable {
     private let lock = NSLock()

@@ -53,7 +53,17 @@ public enum XAuthCapture {
             }
         }
 
+        if let fallback = knownPublicBearerToken() {
+            return fallback
+        }
+
         throw XDirectClientError.bearerTokenNotFound
+    }
+
+    private static func knownPublicBearerToken() -> String? {
+        // Public web client bearer used by X/Twitter web. Not a user secret.
+        let token = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+        return firstBearerToken(in: token)
     }
 
     public static func findMainScriptURL(session: URLSession = .shared) async throws -> URL {
@@ -111,7 +121,7 @@ public enum XAuthCapture {
     }
 
     static func firstBearerToken(in text: String) -> String? {
-        firstMatch(in: text, pattern: #"AAAAA[A-Za-z0-9%_-]{30,}"#)
+        firstMatch(in: text, pattern: #"AAAAA[A-Za-z0-9%_\-.=]{30,}"#)
     }
 
     static func scriptURLs(in html: String) -> [URL] {
@@ -121,9 +131,10 @@ public enum XAuthCapture {
     static func javaScriptAssetURLs(in text: String, baseURL: URL) -> [URL] {
         let patterns = [
             #"https://abs\.twimg\.com/responsive-web/client-web/[^"'` <>\n\r]+\.js"#,
-            #"https://abs\.twimg\.com/x-web/x-web/assets/[^"'` <>\n\r]+\.js"#,
+            #"https://abs\.twimg\.com/x-web/x-web/(?:assets/)?[^"'` <>\n\r]+\.js"#,
             #"(?:src|href)\s*=\s*["']([^"']+\.js)["']"#,
-            #"["'`]((?:\./|assets/)[A-Za-z0-9_./-]+\.js)["'`]"#
+            #"["'`]((?:\./|assets/)[A-Za-z0-9_./-]+\.js)["'`]"#,
+            #"from\s*["'`](\.?/?assets/[^"'`]+\.js)["'`]"#
         ]
 
         var urls: [URL] = []
@@ -137,10 +148,15 @@ public enum XAuthCapture {
                 resolved = URL(string: "https:\(raw)")
             } else if let url = URL(string: raw), url.scheme != nil {
                 resolved = url
-            } else if raw.hasPrefix("assets/") {
-                resolved = URL(string: raw, relativeTo: URL(string: "https://abs.twimg.com/x-web/x-web/")!)?.absoluteURL
+            } else if raw.hasPrefix("assets/") || raw.hasPrefix("./assets/") {
+                let normalized = raw.hasPrefix("./") ? String(raw.dropFirst(2)) : raw
+                resolved = URL(string: normalized, relativeTo: URL(string: "https://abs.twimg.com/x-web/x-web/")!)?.absoluteURL
             } else {
-                resolved = URL(string: raw, relativeTo: baseURL)?.absoluteURL
+                let baseDirectory = baseURL.deletingLastPathComponent()
+                resolved = URL(string: raw, relativeTo: baseDirectory)?.absoluteURL
+                if resolved == nil {
+                    resolved = URL(string: raw, relativeTo: baseURL)?.absoluteURL
+                }
             }
 
             guard let url = resolved else { return }
@@ -194,9 +210,11 @@ public enum XAuthCapture {
     private static func scriptPriority(_ url: URL) -> Int {
         let value = url.absoluteString
         if value.contains("guest-token") { return 0 }
-        if value.contains("/responsive-web/client-web/main.") { return 1 }
-        if value.contains("/responsive-web/client-web/") { return 2 }
-        if value.contains("/x-web/x-web/assets/") { return 3 }
+        if value.contains("entry-client") { return 1 }
+        if value.contains("/responsive-web/client-web/main.") { return 2 }
+        if value.contains("/responsive-web/client-web/") { return 3 }
+        if value.contains("/x-web/x-web/assets/") { return 4 }
+        if value.contains("/x-web/x-web/") { return 5 }
         return 10
     }
 

@@ -143,7 +143,7 @@ public enum XAuthCapture {
         let searchRange = NSRange(location: 0, length: ns.length)
 
         func append(_ raw: String) {
-            let resolved: URL?
+            var resolved: URL?
             if raw.hasPrefix("//") {
                 resolved = URL(string: "https:\(raw)")
             } else if let url = URL(string: raw), url.scheme != nil {
